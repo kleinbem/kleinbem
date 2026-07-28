@@ -1,0 +1,5 @@
+# Nix build output symlinks (kleinbem/flake.nix — the writeShellApplication
+# packaging prototype, see kleinbem/tools/jj-status.sh)
+result
+result-*
+result_*

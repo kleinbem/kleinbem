@@ -6,23 +6,23 @@
 },
 {
 "name": "NixOS Config",
-"path": "nix/nix-config"
+"path": "../nix-config"
 },
 {
 "name": "Nix Secrets",
-"path": "nix/nix-secrets"
+"path": "../nix-secrets"
 },
 {
 "name": "OpenWrt Builder",
-"path": "openwrt/openwrt-builder"
+"path": "../openwrt-builder"
 },
 {
 "name": "OpenWrt Config",
-"path": "openwrt/openwrt-config"
+"path": "../openwrt-config"
 },
 {
 "name": "OpenWrt Secrets",
-"path": "openwrt/openwrt-secrets"
+"path": "../openwrt-secrets"
 }
 ],
 "settings": {
