@@ -1,0 +1,31 @@
+{
+"folders": [
+{
+"name": "kleinbem",
+"path": "."
+},
+{
+"name": "NixOS Config",
+"path": "nix/nix-config"
+},
+{
+"name": "Nix Secrets",
+"path": "nix/nix-secrets"
+},
+{
+"name": "OpenWrt Builder",
+"path": "openwrt/openwrt-builder"
+},
+{
+"name": "OpenWrt Config",
+"path": "openwrt/openwrt-config"
+},
+{
+"name": "OpenWrt Secrets",
+"path": "openwrt/openwrt-secrets"
+}
+],
+"settings": {
+"direnv.restart.automatic": true
+}
+}
