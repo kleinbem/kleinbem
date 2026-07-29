@@ -243,6 +243,258 @@ cmd_init_bookmarks() {
     gum style --foreground 46 --margin "1 0" "✅ Bookmark tracking ensured."
 }
 
+# --- pull-all ---
+cmd_pull_all() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📥 Fetching + rebasing all repositories"
+    for repo in $targets; do
+        local name="$repo" rpath="$ROOT/$repo" url="https://github.com/kleinbem/$repo.git"
+        gum spin --spinner dot --title "$name..." -- \
+            bash -c "cd '$rpath' && git -c credential.helper= -c credential.helper='!gh auth git-credential' fetch '$url' main:refs/remotes/origin/main >/dev/null 2>&1 && jj git import >/dev/null 2>&1 && jj rebase -d main@origin >/dev/null 2>&1 || true"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ pull-all complete. Run: just jj::status-all"
+}
+
+# --- save-all ---
+cmd_save_all() {
+    local msg="${1:-}" filter="${2:-}"
+    if [ -z "$msg" ]; then
+        msg=$(gum input --header "Commit message" --placeholder "feat(...): ...")
+    fi
+    if [ -z "$msg" ]; then
+        gum style --foreground 196 "❌ No message provided. Aborting."
+        exit 1
+    fi
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "💾 Saving workspace state: $msg"
+    local targets
+    targets=$(resolve_targets "$filter")
+    local author=""
+    if [ -n "${KLEINBEM_PERSONA:-}" ]; then
+        author=$(nix eval --raw --file "$ROOT/nix-config/personas.nix" --apply \
+            "p: p.${KLEINBEM_PERSONA}.full-name + \" <\" + p.${KLEINBEM_PERSONA}.email + \">\"" 2>/dev/null)
+        gum style --foreground 99 "🎭 Acting as: $author"
+    fi
+    # Classify dirty repos first: in a fan-out save, a repo whose ONLY change
+    # is flake.lock churn gets a lockfile message instead of the unrelated
+    # fan-out message. If EVERY dirty repo is lock-only, the given message is
+    # kept — that's a deliberate lock bump.
+    local dirty=() lockonly=() nonlock=0
+    for repo in $targets; do
+        local rpath="$ROOT/$repo" summary
+        summary=$(cd "$rpath" 2>/dev/null && jj diff --summary 2>/dev/null) || summary=""
+        if [ -n "$summary" ]; then
+            dirty+=("$repo")
+            if printf '%s\n' "$summary" | grep -qv 'flake\.lock$'; then
+                nonlock=1
+            else
+                lockonly+=("$repo")
+            fi
+        fi
+    done
+    local any=0
+    for repo in ${dirty[@]+"${dirty[@]}"}; do
+        local name="$repo" rpath="$ROOT/$repo" rmsg="$msg"
+        any=1
+        if [ "$nonlock" -eq 1 ] && printf '%s\n' ${lockonly[@]+"${lockonly[@]}"} | grep -qxF -- "$repo"; then
+            rmsg="chore: update flake lockfiles"
+        fi
+        gum style --foreground 212 "  📝 $name — describing ($rmsg)..."
+        # Show exactly what's being committed — a fan-out save can otherwise
+        # silently scoop another session's in-flight work.
+        (cd "$rpath" && jj diff --summary 2>/dev/null | sed 's/^/     /')
+        if [ -n "$author" ]; then
+            (cd "$rpath" && jj describe -m "$rmsg" --author "$author" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
+        else
+            (cd "$rpath" && jj describe -m "$rmsg" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
+        fi
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 220 --margin "1 0" "✓ Workspace clean — nothing to describe."
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Workspace state saved."
+    fi
+}
+
+# --- save (single repo, fan-out-free) ---
+cmd_save() {
+    local repo="${1:?repo required}" msg="${2:?message required}"
+    local dir="$ROOT/$repo"
+    [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo"; exit 1; }
+    local summary
+    summary=$(cd "$dir" && jj diff --summary 2>/dev/null) || summary=""
+    if [ -z "$summary" ]; then
+        gum style --foreground 220 "✓ $repo clean — nothing to describe."
+        exit 0
+    fi
+    printf '%s\n' "$summary" | sed 's/^/  /'
+    (cd "$dir" && jj describe -m "$msg" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
+    gum style --foreground 46 "✅ $repo described: $msg"
+}
+
+# --- sign-unsigned ---
+cmd_sign_unsigned() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signing unsigned commits ahead of origin"
+    local any_done=0
+    for repo in $targets; do
+        local name="$repo" rpath="$ROOT/$repo"
+        # Auto-advance: if @ has a description and is ahead of main bookmark,
+        # move main to @ so the unsigned commit becomes visible to git.
+        if [ -n "$(cd "$rpath" && jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
+            (cd "$rpath" && jj bookmark move main --to @ >/dev/null 2>&1 || true)
+        fi
+        local unsigned
+        # Repos with no origin/main yet (e.g. never pushed) make `git log`
+        # fail fatally — harmless under the original per-recipe `set -e`
+        # (no pipefail there), but this script's global `set -euo pipefail`
+        # would otherwise abort the whole run. Check the ref exists first
+        # rather than trying to recover after the fact — wc -l happily
+        # reports "0" even when the upstream git command failed, so a bare
+        # "|| echo 0" fallback here would double up the output instead of
+        # replacing it.
+        if git -C "$rpath" rev-parse -q --verify origin/main >/dev/null 2>&1; then
+            unsigned=$(git -C "$rpath" log --format='%G?' "origin/main..main" 2>/dev/null \
+                | awk '$1 != "G" && $1 != ""' | wc -l)
+        else
+            unsigned=0
+        fi
+        if [ "$unsigned" -gt 0 ]; then
+            gum style --foreground 212 "  🖊  $name — re-signing $unsigned commit(s)..."
+            # Pre-flight: jj-colocated repos frequently leave git's HEAD
+            # detached. `git rebase` needs an attached branch. Detect
+            # detached HEAD and force-attach to main BEFORE the stash dance —
+            # safe because after the auto-advance above, jj's working copy
+            # == main == tree, so `checkout -f main` doesn't discard anything.
+            local head_ref
+            head_ref=$(cd "$rpath" && git symbolic-ref --quiet HEAD 2>/dev/null || true)
+            if [ "$head_ref" != "refs/heads/main" ]; then
+                (cd "$rpath" && git checkout -f main >/dev/null 2>&1 || true)
+            fi
+            # Stash dance — unique marker so we never accidentally pop a
+            # pre-existing stash from earlier work.
+            local stash_msg
+            stash_msg="auto-stash-sign-unsigned-$$-$(date +%s%N)"
+            (cd "$rpath" && git stash push -u -m "$stash_msg" >/dev/null 2>&1 || true)
+            local stash_ref
+            stash_ref=$(cd "$rpath" && git stash list 2>/dev/null | grep -F "$stash_msg" | head -1 | cut -d: -f1)
+            (cd "$rpath" && git checkout main >/dev/null 2>&1 || true)
+            # shellcheck disable=SC2016 # single-quoted on purpose: this is a
+            # shell fragment for git-rebase's spawned shell to expand, not us
+            if (cd "$rpath" && git rebase --exec \
+                'if [ "$(git log -1 --format=%G?)" != "G" ]; then git commit --amend --no-edit -S; fi' \
+                origin/main); then
+                if [ "$(git -C "$rpath" symbolic-ref --quiet HEAD 2>/dev/null)" = "refs/heads/main" ]; then
+                    (cd "$rpath" && jj git import >/dev/null 2>&1) \
+                        && gum style --foreground 46 "    ↳ main at signed HEAD; jj bookmark synced"
+                else
+                    (cd "$rpath" && git branch -f main HEAD && git checkout main >/dev/null 2>&1 && jj git import >/dev/null 2>&1) \
+                        && gum style --foreground 46 "    ↳ reattached main + jj bookmark"
+                fi
+                # Pop ONLY our marker-tagged stash, never a pre-existing one.
+                [ -n "$stash_ref" ] && (cd "$rpath" && git stash pop "$stash_ref" >/dev/null 2>&1 || true)
+            else
+                [ -n "$stash_ref" ] && (cd "$rpath" && git stash pop "$stash_ref" >/dev/null 2>&1 || true)
+                gum style --foreground 196 "    ⚠ rebase failed in $name — fix manually"
+            fi
+            any_done=1
+        fi
+    done
+    if [ "$any_done" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ Nothing to sign — all ahead-of-origin commits already signed"
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Done. Verify with: just jj::check-signatures"
+    fi
+}
+
+# --- push-all ---
+cmd_push_all() {
+    local filter="${1:-}" targets
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📤 Pushing all changes (HTTPS+gh, verified)"
+    targets=$(resolve_targets "$filter")
+    local failed=()
+    for repo in $targets; do
+        local name="$repo" rpath="$ROOT/$repo" url="https://github.com/kleinbem/$repo.git"
+        (
+        cd "$rpath" 2>/dev/null || { gum style --foreground 196 "  ❌ $name (dir missing)"; exit 1; }
+        # Advance main to @ if there are new described commits.
+        if [ -n "$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
+            jj bookmark move main --to @ >/dev/null 2>&1 || true
+        fi
+        target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
+        [ -z "$target" ] && { gum style --foreground 244 "  ⏭  $name (no main bookmark)"; exit 0; }
+        before=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
+        [ "$before" = "$target" ] && { gum style --foreground 244 "  ✓ $name up to date (${target:0:12})"; exit 0; }
+        attempt=1
+        while :; do
+            out=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' push "$url" "$target:refs/heads/main" 2>&1 || true)
+            after=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
+            [ "$after" = "$target" ] && break
+            # Diverged remote: recover in place — fetch, import, rebase our
+            # work onto origin, re-advance main — retry the push ONCE.
+            if [ "$attempt" -eq 1 ] && printf '%s\n' "$out" | grep -qiE 'fetch first|non-fast-forward|behind'; then
+                attempt=2
+                gum style --foreground 220 "  🔁 $name diverged — fetch + rebase, retrying once..."
+                git -c credential.helper= -c credential.helper='!gh auth git-credential' fetch "$url" main:refs/remotes/origin/main >/dev/null 2>&1 || true
+                jj git import >/dev/null 2>&1 || true
+                jj rebase -d main@origin >/dev/null 2>&1 || true
+                if [ -n "$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
+                    jj bookmark move main --to @ >/dev/null 2>&1 || true
+                fi
+                target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
+                continue
+            fi
+            break
+        done
+        if [ "$after" = "$target" ] && [ -n "$target" ]; then
+            git update-ref refs/remotes/origin/main "$target" 2>/dev/null || true
+            jj git import >/dev/null 2>&1 || true
+            gum style --foreground 46 "  ✅ $name → ${target:0:12} (verified on origin)"
+        else
+            gum style --foreground 196 "  ❌ $name — remote still ${after:0:12}, NOT pushed"
+            printf '%s\n' "$out" | grep -iE 'rejected|error|denied|signature|fetch first|behind|protected' | sed 's/^/     /' | head -3
+            exit 1
+        fi
+        ) || failed+=("$name")
+    done
+    if [ ${#failed[@]} -gt 0 ]; then
+        gum style --foreground 196 --margin "1 0" "❌ NOT pushed: ${failed[*]}"
+        gum style --foreground 220 "   ↳ diverged remote → 'just jj::pull-all' then retry  ·  unsigned → 'just jj::sign-unsigned'  ·  scope → 'gh auth refresh -s workflow'"
+        exit 1
+    else
+        gum style --foreground 46 --margin "1 0" "✅ All pushes verified on origin."
+    fi
+}
+
+# --- sync (bootstrap + pull-all) ---
+cmd_sync() {
+    local filter="${1:-}"
+    cmd_bootstrap "$filter"
+    cmd_pull_all "$filter"
+}
+
+# --- branch-all ---
+cmd_branch_all() {
+    # Named bookmark_name, not "name" — the per-repo loop below already uses
+    # $name as its own local (matching the pattern of every other subcommand
+    # here), and unlike the old just recipe (where {{name}} was a literal
+    # text-substitution done before bash ever ran, so it couldn't collide
+    # with a same-named bash variable), these are now real bash locals that
+    # would otherwise shadow each other.
+    local bookmark_name="${1:?bookmark name required}" filter="${2:-}"
+    gum confirm "🌿 Create bookmark '$bookmark_name' across the workspace?" || exit 0
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌿 Creating bookmark '$bookmark_name'"
+    local targets
+    targets=$(resolve_targets "$filter")
+    for repo in $targets; do
+        local name="$repo"
+        gum spin --spinner dot --title "$name..." -- \
+            bash -c "cd '$ROOT/$repo' && jj bookmark create '$bookmark_name'"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ Bookmark created."
+}
+
 # --- dispatch ---
 subcommand="${1:-}"
 [ -n "$subcommand" ] || { echo "Usage: jj-fleet <subcommand> [args...]" >&2; exit 1; }
@@ -256,9 +508,16 @@ diff-all) cmd_diff_all "$@" ;;
 check-signatures) cmd_check_signatures "$@" ;;
 bootstrap) cmd_bootstrap "$@" ;;
 init-bookmarks) cmd_init_bookmarks "$@" ;;
+pull-all) cmd_pull_all "$@" ;;
+save-all) cmd_save_all "$@" ;;
+save) cmd_save "$@" ;;
+sign-unsigned) cmd_sign_unsigned "$@" ;;
+push-all) cmd_push_all "$@" ;;
+sync) cmd_sync "$@" ;;
+branch-all) cmd_branch_all "$@" ;;
 *)
     echo "Unknown subcommand: $subcommand" >&2
-    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks" >&2
+    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all" >&2
     exit 1
     ;;
 esac
