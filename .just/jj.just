@@ -137,7 +137,7 @@ sign-unsigned filter="":
     #!/usr/bin/env bash
     set -e
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signing unsigned commits ahead of origin"
-    targets=$({{_targets}} "{{filter}}" {{REPOS}} -- {{ALL_REPOS}})
+    targets=$({{_targets}} "{{filter}}" {{REPOS}})
     any_done=0
     for repo in $targets; do
         name="$repo"
@@ -202,7 +202,7 @@ pull-all filter="":
     #!/usr/bin/env bash
     set -e
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📥 Fetching + rebasing all repositories"
-    targets=$({{_targets}} "{{filter}}" {{REPOS}} -- {{ALL_REPOS}})
+    targets=$({{_targets}} "{{filter}}" {{REPOS}})
     for repo in $targets; do
         name="$repo"
         rpath="{{ROOT}}/$repo"
@@ -230,7 +230,7 @@ save-all message="" filter="":
         exit 1
     fi
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "💾 Saving workspace state: $msg"
-    targets=$({{_targets}} "{{filter}}" {{REPOS}} -- {{ALL_REPOS}})
+    targets=$({{_targets}} "{{filter}}" {{REPOS}})
     author=""
     if [ -n "${KLEINBEM_PERSONA:-}" ]; then
         author=$(nix eval --raw --file {{ROOT}}/nix-config/personas.nix --apply \
@@ -356,7 +356,7 @@ push-all filter="":
     # token to carry the `workflow` scope (gh auth refresh -s workflow) so it can
     # push .github/workflows changes.
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📤 Pushing all changes (HTTPS+gh, verified)"
-    targets=$({{_targets}} "{{filter}}" {{REPOS}} -- {{ALL_REPOS}})
+    targets=$({{_targets}} "{{filter}}" {{REPOS}})
     failed=()
     for repo in $targets; do
         name="$repo"
@@ -442,7 +442,7 @@ branch-all name filter="":
     set -e
     gum confirm "🌿 Create bookmark '{{name}}' across the workspace?" || exit 0
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌿 Creating bookmark '{{name}}'"
-    targets=$({{_targets}} "{{filter}}" {{REPOS}} -- {{ALL_REPOS}})
+    targets=$({{_targets}} "{{filter}}" {{REPOS}})
     for repo in $targets; do
         name="$repo"
         gum spin --spinner dot --title "$name..." -- \
