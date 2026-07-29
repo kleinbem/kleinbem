@@ -44,7 +44,7 @@ _targets := "bash " + ROOT + "/kleinbem/tools/resolve-targets.sh"
 hub:
     #!/usr/bin/env bash
     set -e
-    choice=$(gum choose --header "📦 Workspace Operations ({{DOMAIN}})" \
+    choice=$(gum choose --header "📦 Workspace Operations ({{file_name(justfile_directory())}})" \
         "ship-all         — describe + sign + push (the everything button)" \
         "─────────────────────────────────────────────" \
         "status-all       — repo state + ahead-of-origin counts" \
@@ -88,23 +88,23 @@ hub:
 #   just jj::status-all nix-secrets  # just that one repo, from anywhere
 [group("Status")]
 status-all filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh status-all {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh status-all {{filter}}
 
 # GitHub remote dashboard — origin/main SHA, latest CI status,
 # open PR count, open issue count per repo. ~6s due to gh API roundtrips.
 [group("Status")]
 remote-status filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-status {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-status {{filter}}
 
 # Every open PR across the scope as a flat table.
 [group("Status")]
 remote-prs filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-prs {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-prs {{filter}}
 
 # Recent CI workflow runs per repo as a single flat table.
 [group("Status")]
 remote-ci limit="5" filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-ci {{limit}} {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-ci {{limit}} {{filter}}
 
 # Show the working-copy diff for every dirty repo in scope.
 # Variadic — pass any `jj diff` flag through:
@@ -113,7 +113,7 @@ remote-ci limit="5" filter="":
 #   just jj::diff-all nix --stat  # filtered to "nix", stat summary
 [group("Status")]
 diff-all filter="" *args="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh diff-all {{filter}} {{args}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh diff-all {{filter}} {{args}}
 
 # Audit commits ahead of origin for missing signatures.
 # Status codes (git's %G?):
@@ -124,7 +124,7 @@ diff-all filter="" *args="":
 #   E, X, Y, R  various error states
 [group("Status")]
 check-signatures filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh check-signatures {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh check-signatures {{filter}}
 
 # Sign every unsigned commit ahead of origin, in scope.
 # Uses `git rebase --exec` rather than `jj sign` (more reliable).
@@ -328,9 +328,11 @@ ship-all message="" filter="":
     fi
     gum style --border normal --padding "0 2" --border-foreground 99 --foreground 99 "🚢 Shipping: $msg"
     just jj::save-all "$msg" "{{filter}}"
-    # Flake-lockfile sync only applies to the nix domain — openwrt/kleinbem
-    # have no flakes, and don't carry a maintenance::update-local recipe.
-    if [ "{{DOMAIN}}" = "nix" ]; then
+    # Flake-lockfile sync only makes sense where a maintenance::update-local
+    # recipe actually exists (nix/ has one; openwrt/kleinbem don't, no flakes
+    # to sync). Check for the recipe directly rather than hardcoding a repo
+    # name — works the same way for any future repo, flake or not.
+    if just --show maintenance::update-local >/dev/null 2>&1; then
         just maintenance::update-local
         just jj::save-all "chore: update flake lockfiles" "{{filter}}"
     fi
@@ -427,12 +429,12 @@ sync filter="":
 # inside one to run this.
 [group("Development")]
 bootstrap filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh bootstrap {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh bootstrap {{filter}}
 
 # One-time setup per repo: tell jj that main tracks main@origin.
 [group("Development")]
 init-bookmarks filter="":
-    @ROOT={{ROOT}} DOMAIN={{DOMAIN}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh init-bookmarks {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh init-bookmarks {{filter}}
 
 [group("Development")]
 branch-all name filter="":

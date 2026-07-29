@@ -1,67 +1,30 @@
 # Fleet-wide sub-repo manifest — single source of truth for every repo in the
-# kleinbem workspace. Replaces the two separate nix/repos.nix and
-# openwrt/repos.nix manifests (superseded, deleted).
+# kleinbem workspace. Flat list, no categorization: every repo is a peer,
+# including the three former "conductors" (nix, openwrt, kleinbem itself) —
+# there's no nix-specific or openwrt-specific handling anywhere in the
+# tooling that reads this file. Add a new repo here and it's immediately
+# visible to status-all/bootstrap/etc, from anywhere in the workspace, with
+# zero other setup.
 #
-# Each entry is { url; domain; }. `domain` drives which conductor's dashboard
-# a repo shows up in by default (see kleinbem/.just/common.just — the DOMAIN
-# variable resolves to the invoking conductor's directory name):
-#   - "nix"     — default scope for `nix/`
-#   - "openwrt" — default scope for `openwrt/`
-#   - "shared"  — appears in EVERY conductor's default scope (cross-cutting:
-#                 governs or is needed by more than one domain)
-# `kleinbem/`'s own dashboard always operates on the full fleet regardless of
-# domain.
-#
-# To clone every repo in scope, run `just jj::bootstrap` from any conductor
-# (or from `kleinbem/` for the whole fleet). Each repo is its own independent
-# git+jj repo with its own history & CI — NOT a git submodule.
+# To clone every repo, run `just jj::bootstrap` (or bare `jj-fleet bootstrap`
+# if the devshell has it on PATH) from anywhere in the workspace — it skips
+# whatever's already on disk, so running it from inside one of these repos
+# never tries to re-clone itself. Each repo is its own independent git+jj
+# repo with its own history & CI — NOT a git submodule.
 {
-  nix-config = {
-    url = "git@github.com:kleinbem/nix-config.git";
-    domain = "nix";
-  };
-  nix-devshells = {
-    url = "git@github.com:kleinbem/nix-devshells.git";
-    domain = "nix";
-  };
-  nix-hardware = {
-    url = "git@github.com:kleinbem/nix-hardware.git";
-    domain = "nix";
-  };
-  nix-packages = {
-    url = "git@github.com:kleinbem/nix-packages.git";
-    domain = "nix";
-  };
-  nix-presets = {
-    url = "git@github.com:kleinbem/nix-presets.git";
-    domain = "nix";
-  };
-  nix-secrets = {
-    url = "git@github.com:kleinbem/nix-secrets.git";
-    domain = "nix";
-  };
-  nix-templates = {
-    url = "git@github.com:kleinbem/nix-templates.git";
-    domain = "nix";
-  };
-  openwrt-builder = {
-    url = "git@github.com:kleinbem/openwrt-builder.git";
-    domain = "openwrt";
-  };
-  openwrt-config = {
-    url = "git@github.com:kleinbem/openwrt-config.git";
-    domain = "openwrt";
-  };
-  openwrt-secrets = {
-    url = "git@github.com:kleinbem/openwrt-secrets.git";
-    domain = "openwrt";
-  };
-  github-config = {
-    url = "git@github.com:kleinbem/github-config.git";
-    domain = "shared";
-  };
-  kleinbem-secrets = {
-    url = "git@github.com:kleinbem/kleinbem-secrets.git";
-    domain = "shared";
-  };
+  nix = "git@github.com:kleinbem/nix.git";
+  openwrt = "git@github.com:kleinbem/openwrt.git";
+  kleinbem = "git@github.com:kleinbem/kleinbem.git";
+  nix-config = "git@github.com:kleinbem/nix-config.git";
+  nix-devshells = "git@github.com:kleinbem/nix-devshells.git";
+  nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
+  nix-packages = "git@github.com:kleinbem/nix-packages.git";
+  nix-presets = "git@github.com:kleinbem/nix-presets.git";
+  nix-secrets = "git@github.com:kleinbem/nix-secrets.git";
+  nix-templates = "git@github.com:kleinbem/nix-templates.git";
+  openwrt-builder = "git@github.com:kleinbem/openwrt-builder.git";
+  openwrt-config = "git@github.com:kleinbem/openwrt-config.git";
+  openwrt-secrets = "git@github.com:kleinbem/openwrt-secrets.git";
+  github-config = "git@github.com:kleinbem/github-config.git";
+  kleinbem-secrets = "git@github.com:kleinbem/kleinbem-secrets.git";
 }

@@ -1,34 +1,25 @@
 #!/usr/bin/env bash
-# resolve-targets.sh <filter> <default-scope repos...> -- <all repos...>
+# resolve-targets.sh <filter> <repo...>
 #
-# Prints the space-separated list of repos a fan-out jj recipe (status-all,
-# save-all, ship-all, ...) should operate on for this invocation.
+# Prints the repos a fan-out jj recipe (status-all, save-all, ship-all, ...)
+# should operate on. No domain/default-scope concept — there's one flat list
+# of repos and a filter that narrows it.
 #
-#   no filter   -> the default scope as-is (the invoking conductor's domain,
-#                  or the full fleet when invoked from kleinbem/)
-#   filter given -> substring-matched against the FULL fleet, not just the
-#                  default scope, so e.g. `just status-all nix-secrets` works
-#                  from openwrt/ too (cross-domain lookup by design).
+#   no filter   -> print every repo
+#   filter given -> substring-match against every repo (e.g. "nix" catches
+#                  the whole nix-* family plus the bare "nix" repo; "nix-"
+#                  catches only nix-config/nix-presets/etc, not "nix" itself)
 set -euo pipefail
 
 filter="$1"
 shift
 
-default_scope=()
-while [ "$#" -gt 0 ] && [ "$1" != "--" ]; do
-  default_scope+=("$1")
-  shift
-done
-shift # drop the -- separator
-
-all=("$@")
-
 if [ -z "$filter" ]; then
-  printf '%s\n' "${default_scope[@]}"
+    printf '%s\n' "$@"
 else
-  for repo in "${all[@]}"; do
-    case "$repo" in
-    *"$filter"*) printf '%s\n' "$repo" ;;
-    esac
-  done
+    for repo in "$@"; do
+        case "$repo" in
+        *"$filter"*) printf '%s\n' "$repo" ;;
+        esac
+    done
 fi

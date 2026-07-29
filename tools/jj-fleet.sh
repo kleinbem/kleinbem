@@ -8,43 +8,41 @@
 # ship-all, sign-unsigned, ...) is still in kleinbem/.just/jj.just, converted
 # later once this phase proves out.
 #
-# Run FROM the conductor directory (nix/, openwrt/, kleinbem/) whose default
-# scope you want, same convention as `just`. When invoked via the `just`
-# wrappers in jj.just, ROOT/DOMAIN are passed explicitly as env vars (jj.just
-# runs with cwd=.just/, not the conductor dir, so $PWD alone isn't reliable
-# there); direct human invocation falls back to $PWD.
+# No domain concept — one flat list of every repo in kleinbem/repos.nix, no
+# nix/openwrt-specific handling anywhere. status-all with no filter shows
+# everything, always, from anywhere in the workspace.
+#
+# Runnable from ANY directory under the workspace root, not just the three
+# conductors — ROOT is found by walking up from $PWD looking for
+# kleinbem/repos.nix (same trick git/jj use to find their own repo root).
+# `just` recipes that already have {{ROOT}} pass it as an env var to skip the
+# walk; direct invocation (typing `jj-fleet status-all` from inside any repo,
+# once it's on PATH via the devshell) relies on the walk.
 #
 # Usage: jj-fleet <subcommand> [args...]
 set -euo pipefail
 
-ROOT="${ROOT:-$(dirname "$PWD")}"
-DOMAIN="${DOMAIN:-$(basename "$PWD")}"
-
-MANIFEST_REPOS=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
-    --apply 'rs: builtins.concatStringsSep " " (builtins.attrNames rs)' 2>/dev/null || true)
-
-if [ "$DOMAIN" = "kleinbem" ]; then
-    MANIFEST_SCOPE="$MANIFEST_REPOS"
-else
-    MANIFEST_SCOPE=$(DOMAIN="$DOMAIN" nix eval --raw --file "$ROOT/kleinbem/repos.nix" --impure \
-        --apply "rs: import $ROOT/kleinbem/tools/domain-scope.nix rs" 2>/dev/null || true)
-fi
-
-ALL_REPOS="nix openwrt kleinbem $MANIFEST_REPOS"
-if [ "$DOMAIN" = "kleinbem" ]; then
-    REPOS="$ALL_REPOS"
-else
-    REPOS="$DOMAIN $MANIFEST_SCOPE"
-fi
-
-resolve_targets() {
-    # shellcheck disable=SC2086 # intentional word-splitting of REPOS/ALL_REPOS
-    bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $REPOS -- $ALL_REPOS
+find_root() {
+    local dir="$PWD"
+    while [ "$dir" != "/" ]; do
+        if [ -f "$dir/kleinbem/repos.nix" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "jj-fleet: could not find the workspace root (no kleinbem/repos.nix found walking up from $PWD)" >&2
+    return 1
 }
 
-resolve_manifest_targets() {
-    # shellcheck disable=SC2086
-    bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $MANIFEST_SCOPE -- $MANIFEST_REPOS
+ROOT="${ROOT:-$(find_root)}"
+
+ALL_REPOS=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
+    --apply 'rs: builtins.concatStringsSep " " (builtins.attrNames rs)' 2>/dev/null || true)
+
+resolve_targets() {
+    # shellcheck disable=SC2086 # intentional word-splitting of ALL_REPOS
+    bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $ALL_REPOS
 }
 
 # --- status-all ---
@@ -213,7 +211,7 @@ cmd_check_signatures() {
 # --- bootstrap ---
 cmd_bootstrap() {
     local filter="${1:-}" targets
-    targets=$(resolve_manifest_targets "$filter")
+    targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌱 Bootstrapping workspace from kleinbem/repos.nix"
     for repo in $targets; do
         local rpath="$ROOT/$repo"
@@ -221,7 +219,7 @@ cmd_bootstrap() {
             gum style --foreground 46 "  ✓ $repo (already cloned)"
         else
             local url
-            url=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" --apply "rs: rs.\"$repo\".url")
+            url=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" --apply "rs: rs.\"$repo\"")
             gum spin --spinner dot --title "cloning $repo..." -- bash -c "
                 git clone '$url' '$rpath' >/dev/null 2>&1
                 cd '$rpath' && jj git init --colocate >/dev/null 2>&1 && jj bookmark track main --remote=origin >/dev/null 2>&1

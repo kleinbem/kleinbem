@@ -16,36 +16,36 @@ run() {
 echo "resolve-targets.sh"
 
 assert_eq \
-    "nix,github-config,kleinbem-secrets" \
-    "$(run "" nix github-config kleinbem-secrets -- nix github-config kleinbem-secrets nix-config openwrt)" \
-    "no filter -> default scope as-is, order preserved"
+    "nix,nix-config,openwrt,openwrt-builder" \
+    "$(run "" nix nix-config openwrt openwrt-builder)" \
+    "no filter -> every repo, order preserved"
 
 assert_empty \
-    "$(run "" -- nix-config openwrt)" \
-    "no filter, empty default scope -> empty (never falls back to 'all')"
+    "$(run "")" \
+    "no filter, empty repo list -> empty"
+
+assert_eq \
+    "nix,nix-config,nix-presets,nix-secrets" \
+    "$(run "nix" nix nix-config nix-presets nix-secrets openwrt openwrt-builder)" \
+    "filter 'nix' -> the bare 'nix' repo plus the whole nix-* family"
 
 assert_eq \
     "nix-config,nix-presets,nix-secrets" \
-    "$(run "nix" nix github-config -- nix-config nix-presets nix-secrets github-config openwrt-builder)" \
-    "domain-style filter -> substring-matches the FULL fleet, not the default scope"
+    "$(run "nix-" nix nix-config nix-presets nix-secrets openwrt)" \
+    "filter 'nix-' -> only nix-*, excludes the bare 'nix' repo (no dash to match)"
 
 assert_eq \
     "nix-secrets" \
-    "$(run "nix-secrets" nix-config nix-presets -- nix-config nix-presets nix-secrets openwrt-builder)" \
+    "$(run "nix-secrets" nix nix-config nix-presets nix-secrets openwrt-builder)" \
     "exact single-repo filter -> just that one"
 
-assert_eq \
-    "nix-secrets" \
-    "$(run "nix-secrets" openwrt github-config -- openwrt openwrt-builder github-config nix-secrets)" \
-    "cross-domain filter -> finds a repo outside the caller's default scope entirely"
-
 assert_empty \
-    "$(run "bogus-repo-xyz" nix-config -- nix-config openwrt-builder)" \
+    "$(run "bogus-repo-xyz" nix-config openwrt-builder)" \
     "no match -> empty, no error"
 
 assert_eq \
     "kleinbem-secrets" \
-    "$(run "kleinbem-secrets" nix -- nix nix-config kleinbem-secrets)" \
-    "filter matching a 'shared'-tagged repo works the same as any other"
+    "$(run "kleinbem-secrets" nix nix-config kleinbem-secrets)" \
+    "filter matches regardless of which repo it is -- no more special-cased categories"
 
 test_summary

@@ -3,18 +3,31 @@
 # nixpkgs.legacyPackages evaluation cost on every call. That cost isn't
 # `nix run`-specific — it's paid by any fresh nix invocation (run/build/eval)
 # that touches `pkgs`, and there's no per-command way around it, only
-# per-session (a devshell). Wiring jj-fleet into nix-devshells was the other
-# option, but a local flake input needs an absolute path (nix's pure-eval
-# mode rejects `path:../kleinbem`), which means hardcoding this machine's
-# home directory into a file meant to be identical across the fleet — not
-# worth it for a speed fix.
+# per-session (a devshell — see nix-devshells' enterShell, which now also
+# puts the built `jj-fleet` binary on PATH directly for anywhere the devshell
+# is loaded). This wrapper remains the fast path for the `just` recipes
+# specifically (nix/openwrt/kleinbem justfiles, and the bare-root one),
+# which don't assume a devshell is loaded.
 #
-# Instead: build once, cache the resolved /nix/store path, reuse it on every
+# Build once, cache the resolved /nix/store path, reuse it on every
 # subsequent call until the source actually changes (mtime-checked against
 # jj-fleet.sh and flake.nix) or the cached store path has been GC'd.
 set -euo pipefail
 
-ROOT="${ROOT:-$(dirname "$PWD")}"
+find_root() {
+    local dir="$PWD"
+    while [ "$dir" != "/" ]; do
+        if [ -f "$dir/kleinbem/repos.nix" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "run-jj-fleet.sh: could not find the workspace root (no kleinbem/repos.nix found walking up from $PWD)" >&2
+    return 1
+}
+
+ROOT="${ROOT:-$(find_root)}"
 SCRIPT_SRC="$ROOT/kleinbem/tools/jj-fleet.sh"
 FLAKE_SRC="$ROOT/kleinbem/flake.nix"
 CACHE_FILE="/tmp/.jj-fleet-store-path-cache"
@@ -37,4 +50,4 @@ else
     binary="$store_path/bin/jj-fleet"
 fi
 
-exec "$binary" "$@"
+ROOT="$ROOT" exec "$binary" "$@"
