@@ -271,8 +271,16 @@ cmd_save_all() {
     targets=$(resolve_targets "$filter")
     local author=""
     if [ -n "${KLEINBEM_PERSONA:-}" ]; then
-        author=$(nix eval --raw --file "$ROOT/nix-config/personas.nix" --apply \
-            "p: p.${KLEINBEM_PERSONA}.full-name + \" <\" + p.${KLEINBEM_PERSONA}.email + \">\"" 2>/dev/null)
+        # email/full-name are PII — only available via lib/personas.nix's
+        # joined view (personas.nix alone never has them, by design).
+        author=$(nix eval --raw --impure --expr "
+            let
+              lib = (import <nixpkgs> {}).lib;
+              contactPath = $ROOT/nix-secrets/personas-contact.nix;
+              contact = if builtins.pathExists contactPath then import contactPath else {};
+              p = import $ROOT/nix-config/lib/personas.nix { inherit lib contact; };
+            in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
+        " 2>/dev/null)
         gum style --foreground 99 "🎭 Acting as: $author"
     fi
     # Classify dirty repos first: in a fan-out save, a repo whose ONLY change
