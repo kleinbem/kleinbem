@@ -273,14 +273,28 @@ cmd_save_all() {
     if [ -n "${KLEINBEM_PERSONA:-}" ]; then
         # email/full-name are PII — only available via lib/personas.nix's
         # joined view (personas.nix alone never has them, by design).
-        author=$(nix eval --raw --impure --expr "
-            let
-              lib = (import <nixpkgs> {}).lib;
-              contactPath = $ROOT/nix-secrets/personas-contact.nix;
-              contact = if builtins.pathExists contactPath then import contactPath else {};
-              p = import $ROOT/nix-config/lib/personas.nix { inherit lib contact; };
-            in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
-        " 2>/dev/null)
+        # kleinbem-secrets/personas/contact.nix is sops-encrypted (cutover
+        # 2026-08-08 replaced nix-secrets' plaintext copy); decrypt to a
+        # tmpfs temp file and shred it right after use. Must work UNATTENDED
+        # (no YubiKey touch) since this runs from the V2 NoTouch persona
+        # signing pipeline on nixos-nvme — its TPM identity is a recipient
+        # on personas/contact.nix's dedicated .sops.yaml rule for exactly
+        # this reason.
+        local contact_work contact_path
+        contact_work=$(mktemp -d /dev/shm/jj-fleet-contact-XXXXXX)
+        contact_path="$contact_work/contact.nix"
+        if sops -d --input-type binary --output-type binary \
+            "$ROOT/kleinbem-secrets/personas/contact.nix" >"$contact_path" 2>/dev/null; then
+            author=$(nix eval --raw --impure --expr "
+                let
+                  lib = (import <nixpkgs> {}).lib;
+                  contact = import $contact_path;
+                  p = import $ROOT/nix-config/lib/personas.nix { inherit lib contact; };
+                in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
+            " 2>/dev/null)
+        fi
+        shred -u "$contact_path" 2>/dev/null || true
+        rm -rf "$contact_work"
         gum style --foreground 99 "🎭 Acting as: $author"
     fi
     # Classify dirty repos first: in a fan-out save, a repo whose ONLY change

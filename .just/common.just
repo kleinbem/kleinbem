@@ -31,7 +31,15 @@ REPOS := ALL_REPOS
 # --override-input for names that aren't actual flake inputs, so this is
 # harmless rather than worth filtering. Use | as the sed delimiter to avoid
 # conflict with the forward slashes in the ROOT path.
-OVERRIDES := shell("echo '" + ALL_REPOS + "' | sed -E 's|([^ ]+)|--override-input \\1 git+file://" + ROOT + "/\\1|g'")
+#
+# nix-secrets EXCLUDED from the generic loop and remapped explicitly: as of
+# the 2026-08-07 cutover, nix-config's flake input keeps the "nix-secrets"
+# NAME (see nix-config/flake.nix's note) but the repo behind it is now
+# kleinbem-secrets. A plain self-mapped override (--override-input
+# nix-secrets git+file://.../nix-secrets) would point that input at the now-
+# legacy local nix-secrets checkout — silently undoing the cutover for every
+# local build/provisioning recipe that uses {{OVERRIDES}}.
+OVERRIDES := shell("echo '" + ALL_REPOS + "' | tr ' ' '\\n' | grep -vx nix-secrets | tr '\\n' ' ' | sed -E 's|([^ ]+)|--override-input \\1 git+file://" + ROOT + "/\\1|g'") + " --override-input nix-secrets git+file://" + ROOT + "/kleinbem-secrets"
 
 KEEP := "3"
 TIMER := "time "
