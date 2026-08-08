@@ -20,11 +20,9 @@
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
   nix-presets = "git@github.com:kleinbem/nix-presets.git";
-  nix-secrets = "git@github.com:kleinbem/nix-secrets.git";
   nix-templates = "git@github.com:kleinbem/nix-templates.git";
   openwrt-builder = "git@github.com:kleinbem/openwrt-builder.git";
   openwrt-config = "git@github.com:kleinbem/openwrt-config.git";
-  openwrt-secrets = "git@github.com:kleinbem/openwrt-secrets.git";
   github-config = "git@github.com:kleinbem/github-config.git";
   kleinbem-secrets = "git@github.com:kleinbem/kleinbem-secrets.git";
 }
