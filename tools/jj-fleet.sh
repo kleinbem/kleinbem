@@ -4,9 +4,9 @@
 #
 # Covers the read-only/safe recipes only: status-all, diff-all,
 # remote-status, remote-prs, remote-ci, check-signatures, bootstrap,
-# init-bookmarks. Everything with real mutation logic (save-all, push-all,
-# ship-all, sign-unsigned, ...) is still in kleinbem/.just/jj.just, converted
-# later once this phase proves out.
+# init-bookmarks, sweep-merged. Everything with real mutation logic
+# (save-all, push-all, ship-all, sign-unsigned, ...) is still in
+# kleinbem/.just/jj.just, converted later once this phase proves out.
 #
 # No domain concept — one flat list of every repo in kleinbem/repos.nix, no
 # nix/openwrt-specific handling anywhere. status-all with no filter shows
@@ -271,30 +271,23 @@ cmd_save_all() {
     targets=$(resolve_targets "$filter")
     local author=""
     if [ -n "${KLEINBEM_PERSONA:-}" ]; then
-        # email/full-name are PII — only available via lib/personas.nix's
-        # joined view (personas.nix alone never has them, by design).
-        # kleinbem-secrets/personas/contact.nix is sops-encrypted (cutover
-        # 2026-08-08 replaced nix-secrets' plaintext copy); decrypt to a
-        # tmpfs temp file and shred it right after use. Must work UNATTENDED
-        # (no YubiKey touch) since this runs from the V2 NoTouch persona
-        # signing pipeline on nixos-nvme — its TPM identity is a recipient
-        # on personas/contact.nix's dedicated .sops.yaml rule for exactly
-        # this reason.
-        local contact_work contact_path
-        contact_work=$(mktemp -d /dev/shm/jj-fleet-contact-XXXXXX)
-        contact_path="$contact_work/contact.nix"
-        if sops -d --input-type binary --output-type binary \
-            "$ROOT/kleinbem-secrets/personas/contact.nix" >"$contact_path" 2>/dev/null; then
-            author=$(nix eval --raw --impure --expr "
-                let
-                  lib = (import <nixpkgs> {}).lib;
-                  contact = import $contact_path;
-                  p = import $ROOT/nix-config/lib/personas.nix { inherit lib contact; };
-                in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
-            " 2>/dev/null)
-        fi
-        shred -u "$contact_path" 2>/dev/null || true
-        rm -rf "$contact_work"
+        # full-name/email — only available via lib/personas.nix's joined
+        # view (personas.nix alone never has them, by design).
+        # kleinbem-secrets/personas/contact.nix is plain Nix (2026-08-09 —
+        # full-name/email become public the moment a persona commits
+        # anything, so sops-encrypting them at rest never bought real
+        # confidentiality; import it directly, no decrypt step, no tmpfs
+        # dance). This also drops the V2 NoTouch pipeline's former
+        # dependency on nixos-nvme's TPM identity being a working sops
+        # decrypt recipient for this specific file — one less thing that
+        # could fail unattended.
+        author=$(nix eval --raw --impure --expr "
+            let
+              lib = (import <nixpkgs> {}).lib;
+              contact = import $ROOT/kleinbem-secrets/personas/contact.nix;
+              p = import $ROOT/nix-config/lib/personas.nix { inherit lib contact; };
+            in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
+        " 2>/dev/null)
         gum style --foreground 99 "🎭 Acting as: $author"
     fi
     # Classify dirty repos first: in a fan-out save, a repo whose ONLY change
@@ -496,6 +489,73 @@ cmd_sync() {
     cmd_pull_all "$filter"
 }
 
+# --- sweep-merged ---
+# Read-only diagnostic — fetches+prunes every repo in scope, then reports
+# every local branch other than main and whether its content already made
+# it into origin/main. Three detection methods, weakest-signal last:
+#   1. ancestor-of-origin/main   — plain/fast-forward merges
+#   2. commit-subject match      — squash-merges (GitHub's default squash
+#      message is "<original subject> (#N)", so the branch tip's own
+#      subject line shows up verbatim inside a main commit's subject)
+#   3. gh PR search by head ref  — catches anything method 2 misses (e.g.
+#      an amended commit message), at the cost of one gh API call/branch
+# Also flags `gh pr checkout <N>` residue (refs/remotes/pr/* — gh's local
+# tracking convention, not a real GitHub branch) since that's always dead
+# weight regardless of merge status.
+# Never deletes anything itself — a heuristic false-positive across a whole
+# fleet run unattended is worse than one extra manual step. Prints the
+# `jj bookmark forget` command for whatever it flags; run that by hand (or
+# ask an agent) once you've eyeballed the table.
+cmd_sweep_merged() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Branch sweep — local branches vs. origin/main"
+    local rows=("REPO	BRANCH	STATUS	DETAIL") any=0
+    for repo in $targets; do
+        local dir="$ROOT/$repo" name="$repo"
+        [ -d "$dir" ] || continue
+        git -C "$dir" fetch origin --prune --quiet 2>/dev/null || true
+        (cd "$dir" && jj git import >/dev/null 2>&1) || true
+        local branches
+        branches=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null | grep -vx 'main' || true)
+        local pr_residue=""
+        if ! git -C "$dir" remote 2>/dev/null | grep -qx 'pr'; then
+            pr_residue=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/pr 2>/dev/null | sed 's#^pr/##')
+        fi
+        for b in $branches; do
+            [ -z "$b" ] && continue
+            any=1
+            local subject status detail
+            subject=$(git -C "$dir" log -1 --format='%s' "$b" 2>/dev/null)
+            if git -C "$dir" rev-parse -q --verify origin/main >/dev/null 2>&1 \
+                && git -C "$dir" merge-base --is-ancestor "$b" origin/main 2>/dev/null; then
+                status="✅ MERGED"; detail="ancestor of origin/main"
+            elif [ -n "$subject" ] && git -C "$dir" log origin/main --format='%s' 2>/dev/null | grep -qF -- "$subject"; then
+                status="✅ MERGED"; detail="squash-merged (subject match)"
+            elif [ "$(gh pr list --repo "kleinbem/$repo" --state merged --search "head:$b" --json number --jq 'length' 2>/dev/null)" != "0" ]; then
+                status="✅ MERGED"; detail="merged PR found by head branch"
+            else
+                status="⚠ UNCLEAR"; detail="not an ancestor, no matching PR — review before touching"
+            fi
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$b" "$status" "$detail")")
+        done
+        for prn in $pr_residue; do
+            [ -z "$prn" ] && continue
+            any=1
+            rows+=("$(printf '%s\tpr/%s\t🗑 RESIDUE\tgh pr checkout leftover, never a real branch' "$name" "$prn")")
+        done
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✅ Every repo in scope is main-only. Nothing to sweep."
+        return
+    fi
+    printf '%s\n' "${rows[@]}" | gum table -s "$(printf '\t')" --print
+    gum style --foreground 220 --margin "1 0" "ℹ Read-only — nothing deleted. To clean up a flagged branch:"
+    gum style --foreground 244 "   jj bookmark forget <branch>                 # local cleanup"
+    gum style --foreground 244 "   jj git push --deleted                      # only if it was ever pushed to origin"
+    gum style --foreground 244 "   git branch -r -D pr/<N> && jj git import   # for gh-pr-checkout residue"
+}
+
 # --- branch-all ---
 cmd_branch_all() {
     # Named bookmark_name, not "name" — the per-repo loop below already uses
@@ -537,9 +597,10 @@ sign-unsigned) cmd_sign_unsigned "$@" ;;
 push-all) cmd_push_all "$@" ;;
 sync) cmd_sync "$@" ;;
 branch-all) cmd_branch_all "$@" ;;
+sweep-merged) cmd_sweep_merged "$@" ;;
 *)
     echo "Unknown subcommand: $subcommand" >&2
-    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all" >&2
+    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged" >&2
     exit 1
     ;;
 esac
