@@ -49,6 +49,7 @@ hub:
         "remote-prs       — open PRs across the workspace" \
         "remote-ci        — recent CI runs per repo" \
         "check-signatures — audit signatures on commits ahead of origin" \
+        "sweep-merged     — report merged/dead local branches per repo" \
         "─────────────────────────────────────────────" \
         "pull-all         — fetch + rebase every sub-repo" \
         "save-all         — describe (commit) all dirty repos" \
@@ -66,6 +67,7 @@ hub:
         remote-prs*)        just jj::remote-prs ;;
         remote-ci*)         just jj::remote-ci ;;
         check-signatures*)  just jj::check-signatures ;;
+        sweep-merged*)      just jj::sweep-merged ;;
         pull-all*)          just jj::pull-all ;;
         save-all*)          msg=$(gum input --placeholder "Commit message"); just jj::save-all "$msg" ;;
         sign-unsigned*)     just jj::sign-unsigned ;;
@@ -121,6 +123,14 @@ diff-all filter="" *args="":
 [group("Status")]
 check-signatures filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh check-signatures {{filter}}
+
+# Fetch+prune every repo in scope and report local branches other than
+# main: merged (safe to forget) vs. unclear (needs a manual look) vs.
+# `gh pr checkout` residue. Read-only — never deletes anything itself,
+# prints the cleanup one-liner for whatever it flags.
+[group("Status")]
+sweep-merged filter="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sweep-merged {{filter}}
 
 # Sign every unsigned commit ahead of origin, in scope.
 # Uses `git rebase --exec` rather than `jj sign` (more reliable).
