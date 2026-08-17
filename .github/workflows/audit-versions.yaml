@@ -1,0 +1,53 @@
+name: Audit Versions
+
+# Weekly scan for pinned package versions across the fleet
+# Flags versions approaching deprecation in nixpkgs (HIGH priority)
+
+on:
+  schedule:
+    - cron: '0 9 * * 2' # Tuesday 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v27
+        with:
+          nix-path: nixpkgs=channel:nixos-unstable
+
+      - name: Load workspace devshell
+        run: |
+          nix flake update
+          nix develop .#workspace --command just audit-versions | tee audit-versions.log
+
+      - name: Check for findings
+        id: check
+        run: |
+          if grep -q "⚠️\|Error" audit-versions.log; then
+            echo "has_findings=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_findings=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Alert on findings
+        if: steps.check.outputs.has_findings == 'true'
+        run: |
+          echo "## ⚠️ Version Audit Findings" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat audit-versions.log >> $GITHUB_STEP_SUMMARY
+
+      - name: Archive audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-versions-${{ github.run_id }}
+          path: audit-versions.log
+          retention-days: 90
