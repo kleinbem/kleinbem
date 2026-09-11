@@ -1,6 +1,6 @@
 # Fleet Maintenance Automation
 
-Automated auditing and monitoring for the kleinbem infrastructure fleet, derived from [CI-HARDENING-RECOMMENDATIONS.md](../CI-HARDENING-RECOMMENDATIONS.md).
+Automated auditing and monitoring for the kleinbem infrastructure fleet, derived from [CI-HARDENING-RECOMMENDATIONS.md](CI-HARDENING-RECOMMENDATIONS.md).
 
 ## Overview
 
