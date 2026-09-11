@@ -577,6 +577,134 @@ cmd_branch_all() {
     gum style --foreground 46 --margin "1 0" "✅ Bookmark created."
 }
 
+# --- workspace-new / workspace-list / workspace-gc ---
+#
+# jj workspaces give each concurrent agent/session its own working-copy
+# commit and its own files on disk, sharing only the commit graph and op
+# log with the repo's primary checkout. That fixes the failure mode where
+# one Claude tab's `jj new`/`abandon`/`undo`/`restore` silently discards or
+# moves another tab's in-progress edits, because they were all sharing one
+# @ in the primary checkout.
+#
+# Added workspaces live at <repo>.ws/<name>/, a sibling of the repo dir —
+# outside repos.nix's flat namespace, so no *-all fan-out recipe ever
+# touches them. They are jj-only (no .git): raw git doesn't work there,
+# only jj. `jj git push`/pull-all/push-all still work from any workspace
+# since the git backend is shared with the primary checkout.
+cmd_workspace_new() {
+    local repo="${1:?repo required}" name="${2:-}"
+    local dir="$ROOT/$repo"
+    [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo"; exit 1; }
+    [ -z "$name" ] && name="ws-$(date +%H%M%S)-$RANDOM"
+    local ws_root="$ROOT/${repo}.ws" ws_path="$ROOT/${repo}.ws/$name"
+    mkdir -p "$ws_root"
+    [ -e "$ws_path" ] && { gum style --foreground 196 "❌ $ws_path already exists"; exit 1; }
+    (cd "$dir" && jj workspace add "$ws_path" --name "$name" -r main) >/dev/null 2>&1 \
+        || { gum style --foreground 196 "❌ jj workspace add failed — is 'main' tracked here? Try: just jj::init-bookmarks $repo"; exit 1; }
+    if [ -f "$dir/.envrc" ]; then
+        cp "$dir/.envrc" "$ws_path/.envrc"
+        command -v direnv >/dev/null 2>&1 && (cd "$ws_path" && direnv allow >/dev/null 2>&1 || true)
+    fi
+    gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
+    gum style --foreground 212 "   cd $ws_path"
+}
+
+cmd_workspace_list() {
+    local filter="${1:-}" targets any=0
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🗂  Agent workspaces"
+    local rows=("REPO	WORKSPACE	@ STATE	DIR")
+    for repo in $targets; do
+        local dir="$ROOT/$repo"
+        [ -d "$dir" ] || continue
+        local lines
+        lines=$(cd "$dir" && jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' 2>/dev/null | grep -v '^default	' || true)
+        [ -z "$lines" ] && continue
+        while IFS=$'\t' read -r wname wroot; do
+            [ -z "$wname" ] && continue
+            any=1
+            local empty desc state
+            if [ -d "$wroot" ]; then
+                # Query from INSIDE the workspace, not "<name>@" from the
+                # primary checkout — the primary only knows the state as of
+                # that workspace's last snapshot, which is stale until a jj
+                # command actually runs there. cd-ing in forces a fresh
+                # snapshot of whatever's really on disk.
+                empty=$(cd "$wroot" && jj log -r @ --no-graph -T 'if(empty, "1", "0")' 2>/dev/null)
+                desc=$(cd "$wroot" && jj log -r @ --no-graph -T 'description.first_line()' 2>/dev/null)
+            else
+                empty="1"
+                desc=""
+            fi
+            if [ -n "$desc" ]; then
+                state="${desc:0:40}"
+            elif [ "$empty" = "1" ]; then
+                state="empty"
+            else
+                state="dirty, undescribed"
+            fi
+            [ -d "$wroot" ] || state="(dir missing!)"
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$repo" "$wname" "$state" "$wroot")")
+        done <<<"$lines"
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ No agent workspaces open."
+    else
+        printf '%s\n' "${rows[@]}" | gum table -s "$(printf '\t')" --print
+    fi
+}
+
+cmd_workspace_gc() {
+    local filter="" hours=4
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --hours) hours="${2:?}"; shift 2 ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, empty+undescribed only)"
+    local reaped=0 kept=0
+    for repo in $targets; do
+        local dir="$ROOT/$repo"
+        [ -d "$dir" ] || continue
+        local lines
+        lines=$(cd "$dir" && jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' 2>/dev/null | grep -v '^default	' || true)
+        [ -z "$lines" ] && continue
+        while IFS=$'\t' read -r wname wroot; do
+            [ -z "$wname" ] && continue
+            local empty desc orphan=0 age_ok=0
+            if [ -d "$wroot" ]; then
+                # Query from INSIDE the workspace to force a fresh snapshot
+                # first — see workspace-list for why querying "<name>@" from
+                # the primary checkout is unsafe (stale-empty false positive
+                # risks deleting real, never-snapshotted edits).
+                empty=$(cd "$wroot" && jj log -r @ --no-graph -T 'if(empty, "1", "0")' 2>/dev/null)
+                desc=$(cd "$wroot" && jj log -r @ --no-graph -T 'description' 2>/dev/null)
+            else
+                orphan=1
+                empty="1"
+                desc=""
+            fi
+            if [ "$orphan" -eq 1 ] || [ -n "$(find "$wroot" -maxdepth 0 -mmin "+$((hours * 60))" 2>/dev/null)" ]; then
+                age_ok=1
+            fi
+            if [ "$orphan" -eq 1 ] || { [ "$empty" = "1" ] && [ -z "$desc" ] && [ "$age_ok" -eq 1 ]; }; then
+                (cd "$dir" && jj workspace forget "$wname") >/dev/null 2>&1 || true
+                rm -rf "$wroot"
+                local note=""
+                [ "$orphan" -eq 1 ] && note=" (dir was already gone)"
+                gum style --foreground 46 "  ✓ reaped $repo/$wname$note"
+                reaped=$((reaped + 1))
+            else
+                kept=$((kept + 1))
+            fi
+        done <<<"$lines"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (has content, described, or too new)."
+}
+
 # --- dispatch ---
 subcommand="${1:-}"
 [ -n "$subcommand" ] || { echo "Usage: jj-fleet <subcommand> [args...]" >&2; exit 1; }
@@ -598,9 +726,12 @@ push-all) cmd_push_all "$@" ;;
 sync) cmd_sync "$@" ;;
 branch-all) cmd_branch_all "$@" ;;
 sweep-merged) cmd_sweep_merged "$@" ;;
+workspace-new) cmd_workspace_new "$@" ;;
+workspace-list) cmd_workspace_list "$@" ;;
+workspace-gc) cmd_workspace_gc "$@" ;;
 *)
     echo "Unknown subcommand: $subcommand" >&2
-    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged" >&2
+    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
     exit 1
     ;;
 esac

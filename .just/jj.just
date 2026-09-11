@@ -234,3 +234,34 @@ init-bookmarks filter="":
 [group("Development")]
 branch-all name filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh branch-all {{name}} {{filter}}
+
+# --- Agent workspaces ---
+#
+# Give a concurrent Claude tab/subagent its own jj working copy instead of
+# sharing @ with the primary checkout — the fix for "another session's
+# `jj new`/`abandon`/`undo` silently discarded my edits". Lives at
+# <repo>.ws/<name>/, a sibling of the repo dir, outside repos.nix's flat
+# namespace so no *-all recipe ever touches it. No .git there — jj-only;
+# push/pull still work from any workspace via the shared git backend.
+
+# Create a fresh workspace for one repo and print the path to cd into.
+#   just jj::ws-new nix-config           # auto-named ws-<time>-<rand>
+#   just jj::ws-new nix-config agentB    # explicit name
+[group("Agent workspaces")]
+ws-new repo name="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-new {{repo}} {{name}}
+
+# List every open agent workspace fleet-wide (or filtered) with its @ state.
+[group("Agent workspaces")]
+ws-list filter="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-list {{filter}}
+
+# Forget + delete agent workspaces that are empty, undescribed, and older
+# than --hours (default 4h) — or already missing their directory. Never
+# touches one with real content, no matter its age.
+#   just jj::ws-gc                  # whole fleet, default age
+#   just jj::ws-gc nix-config       # one repo
+#   just jj::ws-gc "" --hours 1     # whole fleet, tighter age
+[group("Agent workspaces")]
+ws-gc filter="" *args="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-gc {{filter}} {{args}}
