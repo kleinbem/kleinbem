@@ -242,10 +242,13 @@ cmd_pull_all() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📥 Fetching + rebasing all repositories"
+    # Per-repo fetch+rebase (with the credential-helper override that
+    # dodges the oauth-device-flow hang) lives in jj-toolbox/bin/jj-pull —
+    # not duplicated here anymore.
     for repo in $targets; do
-        local name="$repo" rpath="$ROOT/$repo" url="https://github.com/kleinbem/$repo.git"
+        local name="$repo" rpath="$ROOT/$repo"
         gum spin --spinner dot --title "$name..." -- \
-            bash -c "cd '$rpath' && git -c credential.helper= -c credential.helper='!gh auth git-credential' fetch '$url' main:refs/remotes/origin/main >/dev/null 2>&1 && jj git import >/dev/null 2>&1 && jj rebase -d main@origin >/dev/null 2>&1 || true"
+            bash -c "cd '$rpath' && '$ROOT/jj-toolbox/bin/jj-pull' >/dev/null 2>&1 || true"
     done
     gum style --foreground 46 --margin "1 0" "✅ pull-all complete. Run: just jj::status-all"
 }
@@ -312,11 +315,11 @@ cmd_save_all() {
         # Show exactly what's being committed — a fan-out save can otherwise
         # silently scoop another session's in-flight work.
         (cd "$rpath" && jj diff --summary 2>/dev/null | sed 's/^/     /')
-        if [ -n "$author" ]; then
-            (cd "$rpath" && jj describe -m "$rmsg" --author "$author" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
-        else
-            (cd "$rpath" && jj describe -m "$rmsg" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
-        fi
+        # Per-repo describe+advance+new lives in jj-toolbox/bin/jj-save —
+        # not duplicated here anymore.
+        local save_args=("$rmsg")
+        [ -n "$author" ] && save_args=(--author "$author" "$rmsg")
+        (cd "$rpath" && "$ROOT/jj-toolbox/bin/jj-save" "${save_args[@]}") >/dev/null 2>&1
     done
     if [ "$any" -eq 0 ]; then
         gum style --foreground 220 --margin "1 0" "✓ Workspace clean — nothing to describe."
@@ -337,7 +340,7 @@ cmd_save() {
         exit 0
     fi
     printf '%s\n' "$summary" | sed 's/^/  /'
-    (cd "$dir" && jj describe -m "$msg" && jj bookmark move main --to @ && jj new) >/dev/null 2>&1
+    (cd "$dir" && "$ROOT/jj-toolbox/bin/jj-save" "$msg") >/dev/null 2>&1
     gum style --foreground 46 "✅ $repo described: $msg"
 }
 
@@ -490,40 +493,26 @@ cmd_sweep_merged() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Branch sweep — local branches vs. origin/main"
+    # Per-repo detection (ancestor/squash-subject/gh-PR-search, plus gh-pr-
+    # checkout residue) lives in jj-toolbox/bin/jj-sweep-merged — not
+    # duplicated here anymore. This loop fans it out and re-decorates rows
+    # with a REPO column and this table's emoji status style.
     local rows=("REPO	BRANCH	STATUS	DETAIL") any=0
     for repo in $targets; do
-        local dir="$ROOT/$repo" name="$repo"
+        local dir="$ROOT/$repo" name="$repo" out
         [ -d "$dir" ] || continue
-        git -C "$dir" fetch origin --prune --quiet 2>/dev/null || true
-        (cd "$dir" && jj git import >/dev/null 2>&1) || true
-        local branches
-        branches=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null | grep -vx 'main' || true)
-        local pr_residue=""
-        if ! git -C "$dir" remote 2>/dev/null | grep -qx 'pr'; then
-            pr_residue=$(git -C "$dir" for-each-ref --format='%(refname:short)' refs/remotes/pr 2>/dev/null | sed 's#^pr/##')
-        fi
-        for b in $branches; do
-            [ -z "$b" ] && continue
-            any=1
-            local subject status detail
-            subject=$(git -C "$dir" log -1 --format='%s' "$b" 2>/dev/null)
-            if git -C "$dir" rev-parse -q --verify origin/main >/dev/null 2>&1 \
-                && git -C "$dir" merge-base --is-ancestor "$b" origin/main 2>/dev/null; then
-                status="✅ MERGED"; detail="ancestor of origin/main"
-            elif [ -n "$subject" ] && git -C "$dir" log origin/main --format='%s' 2>/dev/null | grep -qF -- "$subject"; then
-                status="✅ MERGED"; detail="squash-merged (subject match)"
-            elif [ "$(gh pr list --repo "kleinbem/$repo" --state merged --search "head:$b" --json number --jq 'length' 2>/dev/null)" != "0" ]; then
-                status="✅ MERGED"; detail="merged PR found by head branch"
-            else
-                status="⚠ UNCLEAR"; detail="not an ancestor, no matching PR — review before touching"
-            fi
-            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$b" "$status" "$detail")")
-        done
-        for prn in $pr_residue; do
-            [ -z "$prn" ] && continue
-            any=1
-            rows+=("$(printf '%s\tpr/%s\t🗑 RESIDUE\tgh pr checkout leftover, never a real branch' "$name" "$prn")")
-        done
+        out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-sweep-merged" --tsv 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        any=1
+        while IFS=$'\t' read -r branch status detail; do
+            [ -z "$branch" ] && continue
+            case "$status" in
+                MERGED) status="✅ MERGED" ;;
+                RESIDUE) status="🗑 RESIDUE" ;;
+                *) status="⚠ $status" ;;
+            esac
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$branch" "$status" "$detail")")
+        done <<<"$out"
     done
     if [ "$any" -eq 0 ]; then
         gum style --foreground 46 --margin "1 0" "✅ Every repo in scope is main-only. Nothing to sweep."
@@ -575,57 +564,39 @@ cmd_workspace_new() {
     local repo="${1:?repo required}" name="${2:-}"
     local dir="$ROOT/$repo"
     [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo"; exit 1; }
+    # Resolve the name here (rather than letting jj-ws-new auto-generate
+    # one) so this can print the exact path without parsing its output.
     [ -z "$name" ] && name="ws-$(date +%H%M%S)-$RANDOM"
-    local ws_root="$ROOT/${repo}.ws" ws_path="$ROOT/${repo}.ws/$name"
-    mkdir -p "$ws_root"
-    [ -e "$ws_path" ] && { gum style --foreground 196 "❌ $ws_path already exists"; exit 1; }
-    (cd "$dir" && jj workspace add "$ws_path" --name "$name" -r main) >/dev/null 2>&1 \
-        || { gum style --foreground 196 "❌ jj workspace add failed — is 'main' tracked here? Try: just jj::init-bookmarks $repo"; exit 1; }
-    if [ -f "$dir/.envrc" ]; then
-        cp "$dir/.envrc" "$ws_path/.envrc"
-        command -v direnv >/dev/null 2>&1 && (cd "$ws_path" && direnv allow >/dev/null 2>&1 || true)
+    local ws_path="${dir}.ws/$name"
+    # Workspace creation (mkdir, jj workspace add -r trunk(), .envrc copy)
+    # lives in jj-toolbox/bin/jj-ws-new — not duplicated here anymore.
+    if (cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-new" "$name") >/dev/null 2>&1; then
+        gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
+        gum style --foreground 212 "   cd $ws_path"
+    else
+        gum style --foreground 196 "❌ jj workspace add failed — is trunk tracked here? Try: just jj::init-bookmarks $repo"
+        exit 1
     fi
-    gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
-    gum style --foreground 212 "   cd $ws_path"
 }
 
 cmd_workspace_list() {
     local filter="${1:-}" targets any=0
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🗂  Agent workspaces"
+    # Per-workspace state detection (empty/dirty-undescribed/described, via
+    # a fresh cd-in snapshot) lives in jj-toolbox/bin/jj-ws-list — not
+    # duplicated here anymore.
     local rows=("REPO	WORKSPACE	@ STATE	DIR")
     for repo in $targets; do
-        local dir="$ROOT/$repo"
+        local dir="$ROOT/$repo" out
         [ -d "$dir" ] || continue
-        local lines
-        lines=$(cd "$dir" && jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' 2>/dev/null | grep -v '^default	' || true)
-        [ -z "$lines" ] && continue
-        while IFS=$'\t' read -r wname wroot; do
+        out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-list" --tsv 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        any=1
+        while IFS=$'\t' read -r wname state wroot; do
             [ -z "$wname" ] && continue
-            any=1
-            local empty desc state
-            if [ -d "$wroot" ]; then
-                # Query from INSIDE the workspace, not "<name>@" from the
-                # primary checkout — the primary only knows the state as of
-                # that workspace's last snapshot, which is stale until a jj
-                # command actually runs there. cd-ing in forces a fresh
-                # snapshot of whatever's really on disk.
-                empty=$(cd "$wroot" && jj log -r @ --no-graph -T 'if(empty, "1", "0")' 2>/dev/null)
-                desc=$(cd "$wroot" && jj log -r @ --no-graph -T 'description.first_line()' 2>/dev/null)
-            else
-                empty="1"
-                desc=""
-            fi
-            if [ -n "$desc" ]; then
-                state="${desc:0:40}"
-            elif [ "$empty" = "1" ]; then
-                state="empty"
-            else
-                state="dirty, undescribed"
-            fi
-            [ -d "$wroot" ] || state="(dir missing!)"
-            rows+=("$(printf '%s\t%s\t%s\t%s' "$repo" "$wname" "$state" "$wroot")")
-        done <<<"$lines"
+            rows+=("$(printf '%s\t%s\t%.40s\t%s' "$repo" "$wname" "$state" "$wroot")")
+        done <<<"$out"
     done
     if [ "$any" -eq 0 ]; then
         gum style --foreground 46 --margin "1 0" "✓ No agent workspaces open."
@@ -645,42 +616,29 @@ cmd_workspace_gc() {
     local targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, empty+undescribed only)"
+    # Per-workspace reap decision (fresh cd-in snapshot, empty+undescribed+
+    # aged-out or orphaned dir) lives in jj-toolbox/bin/jj-ws-gc — not
+    # duplicated here anymore. This loop fans it out and sums the totals.
     local reaped=0 kept=0
     for repo in $targets; do
-        local dir="$ROOT/$repo"
+        local dir="$ROOT/$repo" out
         [ -d "$dir" ] || continue
-        local lines
-        lines=$(cd "$dir" && jj workspace list -T 'name ++ "\t" ++ root ++ "\n"' 2>/dev/null | grep -v '^default	' || true)
-        [ -z "$lines" ] && continue
-        while IFS=$'\t' read -r wname wroot; do
-            [ -z "$wname" ] && continue
-            local empty desc orphan=0 age_ok=0
-            if [ -d "$wroot" ]; then
-                # Query from INSIDE the workspace to force a fresh snapshot
-                # first — see workspace-list for why querying "<name>@" from
-                # the primary checkout is unsafe (stale-empty false positive
-                # risks deleting real, never-snapshotted edits).
-                empty=$(cd "$wroot" && jj log -r @ --no-graph -T 'if(empty, "1", "0")' 2>/dev/null)
-                desc=$(cd "$wroot" && jj log -r @ --no-graph -T 'description' 2>/dev/null)
-            else
-                orphan=1
-                empty="1"
-                desc=""
-            fi
-            if [ "$orphan" -eq 1 ] || [ -n "$(find "$wroot" -maxdepth 0 -mmin "+$((hours * 60))" 2>/dev/null)" ]; then
-                age_ok=1
-            fi
-            if [ "$orphan" -eq 1 ] || { [ "$empty" = "1" ] && [ -z "$desc" ] && [ "$age_ok" -eq 1 ]; }; then
-                (cd "$dir" && jj workspace forget "$wname") >/dev/null 2>&1 || true
-                rm -rf "$wroot"
-                local note=""
-                [ "$orphan" -eq 1 ] && note=" (dir was already gone)"
-                gum style --foreground 46 "  ✓ reaped $repo/$wname$note"
-                reaped=$((reaped + 1))
-            else
-                kept=$((kept + 1))
-            fi
-        done <<<"$lines"
+        out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-gc" --hours "$hours" 2>&1) || true
+        [ -z "$out" ] && continue
+        while IFS= read -r line; do
+            case "$line" in
+                reaped\ *)
+                    gum style --foreground 46 "  ✓ reaped $repo/${line#reaped }"
+                    ;;
+                "GC done:"*)
+                    local r k
+                    r=$(printf '%s' "$line" | grep -oE '^GC done: [0-9]+' | grep -oE '[0-9]+')
+                    k=$(printf '%s' "$line" | grep -oE '[0-9]+ kept' | grep -oE '[0-9]+')
+                    reaped=$((reaped + r))
+                    kept=$((kept + k))
+                    ;;
+            esac
+        done <<<"$out"
     done
     gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (has content, described, or too new)."
 }
