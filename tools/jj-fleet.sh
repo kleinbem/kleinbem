@@ -170,28 +170,22 @@ cmd_check_signatures() {
     local filter="${1:-}" targets any_unsigned=0 any_unverified=0
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signature audit (commits ahead of origin/main)"
-    # NOTE: the loop below must NOT be piped directly into gum table — that
-    # would run it in a subshell, silently losing any_unsigned/any_unverified
-    # (confirmed via shellcheck SC2030/SC2031 while porting this: the
-    # currently-shipping .just/jj.just has exactly this bug today — the
-    # "unsigned commits found" gate has never actually fired). Accumulate
-    # rows in this shell instead, pipe the finished text afterward.
+    # Per-repo audit logic lives in jj-toolbox's jj-check-signatures (not
+    # duplicated here anymore) — this loop just fans it out and folds its
+    # output into one summary table. See jj-toolbox/bin/jj-check-signatures.
     local rows=("REPO	COMMITS	STATUS	DETAIL")
     for repo in $targets; do
-        local name="$repo" dir="$ROOT/$repo" lines unsigned unverified ahead first
-        lines=$(git -C "$dir" log --format='%H %G? %s' "origin/main..main" 2>/dev/null || true)
-        unsigned=$(echo "$lines" | awk '$2 == "N" || $2 == "B" || $2 == "E"')
-        unverified=$(echo "$lines" | awk '$2 == "U" || $2 == "X" || $2 == "Y" || $2 == "R"')
-        ahead=$(echo "$lines" | grep -c . || true)
-        if [ -n "$unsigned" ]; then
-            first=$(echo "$unsigned" | head -1 | awk '{printf "[%s] %s", $2, substr($0, index($0,$3))}')
-            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "❌ UNSIGNED" "$first")")
+        local name="$repo" dir="$ROOT/$repo" out status ahead detail
+        out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-check-signatures" 2>&1) && status=0 || status=$?
+        ahead=$(printf '%s\n' "$out" | tail -n +2 | grep -c '.' || true)
+        if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s\n' "$out" | grep -m1 'UNSIGNED' || echo "—")
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "❌ UNSIGNED" "$detail")")
             any_unsigned=1
-        elif [ -n "$unverified" ]; then
-            first=$(echo "$unverified" | head -1 | awk '{printf "[%s] %s", $2, substr($0, index($0,$3))}')
-            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "⚠ unverified" "$first")")
+        elif printf '%s\n' "$out" | grep -q 'unverified'; then
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "⚠ unverified" "—")")
             any_unverified=1
-        elif [ "$ahead" -eq 0 ] || [ -z "$lines" ]; then
+        elif printf '%s\n' "$out" | grep -q 'nothing to check'; then
             rows+=("$(printf '%s\t0\t✓ none\t—' "$name")")
         else
             rows+=("$(printf '%s\t%s\t✓ all signed\t—' "$name" "$ahead")")
@@ -426,42 +420,28 @@ cmd_sign_unsigned() {
 # --- push-all ---
 cmd_push_all() {
     local filter="${1:-}" targets
-    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📤 Pushing all changes (HTTPS+gh, verified)"
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📤 Pushing all changes (verified on origin)"
     targets=$(resolve_targets "$filter")
     local failed=()
     for repo in $targets; do
         local name="$repo" rpath="$ROOT/$repo" url="https://github.com/kleinbem/$repo.git"
         (
         cd "$rpath" 2>/dev/null || { gum style --foreground 196 "  ❌ $name (dir missing)"; exit 1; }
-        # Advance main to @ if there are new described commits.
-        if [ -n "$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
-            jj bookmark move main --to @ >/dev/null 2>&1 || true
-        fi
         target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
         [ -z "$target" ] && { gum style --foreground 244 "  ⏭  $name (no main bookmark)"; exit 0; }
         before=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
-        [ "$before" = "$target" ] && { gum style --foreground 244 "  ✓ $name up to date (${target:0:12})"; exit 0; }
-        attempt=1
-        while :; do
-            out=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' push "$url" "$target:refs/heads/main" 2>&1 || true)
-            after=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
-            [ "$after" = "$target" ] && break
-            # Diverged remote: recover in place — fetch, import, rebase our
-            # work onto origin, re-advance main — retry the push ONCE.
-            if [ "$attempt" -eq 1 ] && printf '%s\n' "$out" | grep -qiE 'fetch first|non-fast-forward|behind'; then
-                attempt=2
-                gum style --foreground 220 "  🔁 $name diverged — fetch + rebase, retrying once..."
-                git -c credential.helper= -c credential.helper='!gh auth git-credential' fetch "$url" main:refs/remotes/origin/main >/dev/null 2>&1 || true
-                jj git import >/dev/null 2>&1 || true
-                jj rebase -d main@origin >/dev/null 2>&1 || true
-                if [ -n "$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
-                    jj bookmark move main --to @ >/dev/null 2>&1 || true
-                fi
-                target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
-                continue
-            fi
-            break
-        done
+        # A described commit past main hasn't been advanced onto the
+        # bookmark yet (jj-push does that itself) — only skip when there's
+        # truly nothing to advance AND remote already matches.
+        pending=$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)
+        [ "$before" = "$target" ] && [ -z "$pending" ] && { gum style --foreground 244 "  ✓ $name up to date (${target:0:12})"; exit 0; }
+        # Per-repo push mechanics (bookmark-advance, push, credential-helper
+        # override, fetch+rebase+retry once on divergence) live in
+        # jj-toolbox/bin/jj-push — not duplicated here anymore. This loop
+        # just fans it out and verifies the result against origin.
+        out=$("$ROOT/jj-toolbox/bin/jj-push" 2>&1 || true)
+        target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
+        after=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
         if [ "$after" = "$target" ] && [ -n "$target" ]; then
             git update-ref refs/remotes/origin/main "$target" 2>/dev/null || true
             jj git import >/dev/null 2>&1 || true
