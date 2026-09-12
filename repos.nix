@@ -28,4 +28,5 @@
   kleinbem-site = "git@github.com:kleinbem/kleinbem-site.git";
   kleinbem-auth = "git@github.com:kleinbem/kleinbem-auth.git";
   jj-toolbox = "git@github.com:kleinbem/jj-toolbox.git";
+  nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
 }
