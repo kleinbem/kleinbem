@@ -349,68 +349,26 @@ cmd_sign_unsigned() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signing unsigned commits ahead of origin"
+    # Per-repo signing logic (auto-advance, detached-HEAD handling, marker-
+    # tagged stash dance, git rebase --exec re-sign) lives in
+    # jj-toolbox/bin/jj-sign-unsigned — not duplicated here anymore.
     local any_done=0
     for repo in $targets; do
-        local name="$repo" rpath="$ROOT/$repo"
-        # Auto-advance: if @ has a description and is ahead of main bookmark,
-        # move main to @ so the unsigned commit becomes visible to git.
-        if [ -n "$(cd "$rpath" && jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)" ]; then
-            (cd "$rpath" && jj bookmark move main --to @ >/dev/null 2>&1 || true)
+        local name="$repo" rpath="$ROOT/$repo" out status
+        out=$(cd "$rpath" && "$ROOT/jj-toolbox/bin/jj-sign-unsigned" 2>&1) && status=0 || status=$?
+        if printf '%s\n' "$out" | grep -q '^Nothing to sign'; then
+            continue
         fi
-        local unsigned
-        # Repos with no origin/main yet (e.g. never pushed) make `git log`
-        # fail fatally — harmless under the original per-recipe `set -e`
-        # (no pipefail there), but this script's global `set -euo pipefail`
-        # would otherwise abort the whole run. Check the ref exists first
-        # rather than trying to recover after the fact — wc -l happily
-        # reports "0" even when the upstream git command failed, so a bare
-        # "|| echo 0" fallback here would double up the output instead of
-        # replacing it.
-        if git -C "$rpath" rev-parse -q --verify origin/main >/dev/null 2>&1; then
-            unsigned=$(git -C "$rpath" log --format='%G?' "origin/main..main" 2>/dev/null \
-                | awk '$1 != "G" && $1 != ""' | wc -l)
+        any_done=1
+        if [ "$status" -eq 0 ]; then
+            local header rest
+            header=$(printf '%s\n' "$out" | head -1)
+            rest=$(printf '%s\n' "$out" | tail -n +2)
+            gum style --foreground 212 "  🖊  $name — ${header,,}"
+            [ -n "$rest" ] && printf '%s\n' "$rest" | sed 's/^/    ↳ /'
         else
-            unsigned=0
-        fi
-        if [ "$unsigned" -gt 0 ]; then
-            gum style --foreground 212 "  🖊  $name — re-signing $unsigned commit(s)..."
-            # Pre-flight: jj-colocated repos frequently leave git's HEAD
-            # detached. `git rebase` needs an attached branch. Detect
-            # detached HEAD and force-attach to main BEFORE the stash dance —
-            # safe because after the auto-advance above, jj's working copy
-            # == main == tree, so `checkout -f main` doesn't discard anything.
-            local head_ref
-            head_ref=$(cd "$rpath" && git symbolic-ref --quiet HEAD 2>/dev/null || true)
-            if [ "$head_ref" != "refs/heads/main" ]; then
-                (cd "$rpath" && git checkout -f main >/dev/null 2>&1 || true)
-            fi
-            # Stash dance — unique marker so we never accidentally pop a
-            # pre-existing stash from earlier work.
-            local stash_msg
-            stash_msg="auto-stash-sign-unsigned-$$-$(date +%s%N)"
-            (cd "$rpath" && git stash push -u -m "$stash_msg" >/dev/null 2>&1 || true)
-            local stash_ref
-            stash_ref=$(cd "$rpath" && git stash list 2>/dev/null | grep -F "$stash_msg" | head -1 | cut -d: -f1)
-            (cd "$rpath" && git checkout main >/dev/null 2>&1 || true)
-            # shellcheck disable=SC2016 # single-quoted on purpose: this is a
-            # shell fragment for git-rebase's spawned shell to expand, not us
-            if (cd "$rpath" && git rebase --exec \
-                'if [ "$(git log -1 --format=%G?)" != "G" ]; then git commit --amend --no-edit -S; fi' \
-                origin/main); then
-                if [ "$(git -C "$rpath" symbolic-ref --quiet HEAD 2>/dev/null)" = "refs/heads/main" ]; then
-                    (cd "$rpath" && jj git import >/dev/null 2>&1) \
-                        && gum style --foreground 46 "    ↳ main at signed HEAD; jj bookmark synced"
-                else
-                    (cd "$rpath" && git branch -f main HEAD && git checkout main >/dev/null 2>&1 && jj git import >/dev/null 2>&1) \
-                        && gum style --foreground 46 "    ↳ reattached main + jj bookmark"
-                fi
-                # Pop ONLY our marker-tagged stash, never a pre-existing one.
-                [ -n "$stash_ref" ] && (cd "$rpath" && git stash pop "$stash_ref" >/dev/null 2>&1 || true)
-            else
-                [ -n "$stash_ref" ] && (cd "$rpath" && git stash pop "$stash_ref" >/dev/null 2>&1 || true)
-                gum style --foreground 196 "    ⚠ rebase failed in $name — fix manually"
-            fi
-            any_done=1
+            gum style --foreground 196 "  ⚠ rebase failed in $name — fix manually"
+            printf '%s\n' "$out" | sed 's/^/    /'
         fi
     done
     if [ "$any_done" -eq 0 ]; then
