@@ -50,25 +50,34 @@ cmd_status_all() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📊 Workspace Status (jj)"
+    # Per-repo @ state + ahead-of-trunk breakdown lives in
+    # jj-toolbox/bin/jj-ahead — not duplicated here anymore. This loop fans
+    # it out and re-decorates rows with a REPO column and this table's
+    # emoji status style.
     {
         printf "REPO\tCHANGE\t@ STATE\tAHEAD OF ORIGIN\n"
         for repo in $targets; do
-            local dir="$ROOT/$repo" name="$repo" change empty desc desc_short status_desc described_n undescribed_n ahead
-            change=$(cd "$dir" && jj log -r @ --no-graph -T 'change_id.short()' 2>/dev/null)
-            empty=$(cd "$dir" && jj log -r @ --no-graph -T 'if(empty, "1", "0")' 2>/dev/null)
-            desc=$(cd "$dir" && jj log -r @ --no-graph -T 'description.first_line()' 2>/dev/null)
-            desc_short="${desc:0:60}"
-            [ "${#desc}" -gt 60 ] && desc_short="${desc_short}…"
-            if [ "$empty" = "1" ]; then status_desc="(empty)"
-            elif [ -z "$desc" ]; then status_desc="⚠ undescribed"
-            else status_desc="📝 $desc_short"; fi
-            described_n=$(cd "$dir" && jj log -r 'main@origin..@ & ~empty()' --no-graph -T 'if(description, "1\n", "")' 2>/dev/null | grep -c . || true)
-            undescribed_n=$(cd "$dir" && jj log -r 'main@origin..@ & ~empty()' --no-graph -T 'if(description, "", "1\n")' 2>/dev/null | grep -c . || true)
-            if [ "$described_n" -eq 0 ] && [ "$undescribed_n" -eq 0 ]; then ahead="(none)"
-            elif [ "$undescribed_n" -eq 0 ]; then ahead="📝 $described_n ready"
-            elif [ "$described_n" -eq 0 ]; then ahead="⚠ $undescribed_n undescribed"
-            else ahead="📝$described_n ⚠$undescribed_n (mixed)"; fi
-            printf "%s\t%s\t%s\t%s\n" "$name" "$change" "$status_desc" "$ahead"
+            local dir="$ROOT/$repo" name="$repo" change state ahead ready_part undesc_part
+            [ -d "$dir" ] || continue
+            IFS=$'\t' read -r change state ahead < <(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ahead" --tsv 2>/dev/null) || continue
+            [ -z "$change" ] && continue
+            case "$state" in
+                "(empty)") : ;;
+                UNDESCRIBED) state="⚠ undescribed" ;;
+                *) state="📝 $state" ;;
+            esac
+            case "$ahead" in
+                none) ahead="(none)" ;;
+                *,*)
+                    # "N ready, M undescribed" -> "📝N ⚠M (mixed)"
+                    ready_part="${ahead%%,*}"
+                    undesc_part="${ahead#*, }"
+                    ahead="📝${ready_part%% *} ⚠${undesc_part%% *} (mixed)"
+                    ;;
+                *undescribed) ahead="⚠ $ahead" ;;
+                *ready) ahead="📝 $ahead" ;;
+            esac
+            printf "%s\t%s\t%s\t%s\n" "$name" "$change" "$state" "$ahead"
         done
     } | column -t -s $'\t'
 }
