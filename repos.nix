@@ -17,6 +17,7 @@
   kleinbem = "git@github.com:kleinbem/kleinbem.git";
   nix-config = "git@github.com:kleinbem/nix-config.git";
   nix-devshells = "git@github.com:kleinbem/nix-devshells.git";
+  nix-gantry = "git@github.com:kleinbem/nix-gantry.git";
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
   nix-presets = "git@github.com:kleinbem/nix-presets.git";
