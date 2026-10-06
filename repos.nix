@@ -31,4 +31,5 @@
   ".github" = "git@github.com:kleinbem/.github.git";
   jj-toolbox = "git@github.com:kleinbem/jj-toolbox.git";
   nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
+  skills = "git@github.com:kleinbem/skills.git";
 }
