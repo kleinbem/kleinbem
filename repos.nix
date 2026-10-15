@@ -32,4 +32,5 @@
   jj-toolbox = "git@github.com:kleinbem/jj-toolbox.git";
   nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
   skills = "git@github.com:kleinbem/skills.git";
+  mesh-llm-ci = "git@github.com:kleinbem/mesh-llm-ci.git";
 }
