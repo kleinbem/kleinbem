@@ -33,5 +33,6 @@
   nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
   skills = "git@github.com:kleinbem/skills.git";
   mesh-llm-ci = "git@github.com:kleinbem/mesh-llm-ci.git";
+  mesh-llm-gpu = "git@github.com:kleinbem/mesh-llm-gpu.git";
   chrome-open-in-app = "git@github.com:kleinbem/chrome-open-in-app.git";
 }
