@@ -24,6 +24,7 @@
   nix-templates = "git@github.com:kleinbem/nix-templates.git";
   openwrt-builder = "git@github.com:kleinbem/openwrt-builder.git";
   openwrt-config = "git@github.com:kleinbem/openwrt-config.git";
+  android-config = "git@github.com:kleinbem/android-config.git";
   github-config = "git@github.com:kleinbem/github-config.git";
   kleinbem-secrets = "git@github.com:kleinbem/kleinbem-secrets.git";
   kleinbem-site = "git@github.com:kleinbem/kleinbem-site.git";
