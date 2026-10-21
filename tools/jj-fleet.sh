@@ -582,9 +582,9 @@ cmd_workspace_gc() {
     done
     local targets
     targets=$(resolve_targets "$filter")
-    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, empty+undescribed only)"
-    # Per-workspace reap decision (fresh cd-in snapshot, empty+undescribed+
-    # aged-out or orphaned dir) lives in jj-toolbox/bin/jj-ws-gc — not
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, no unmerged work or unsaved edits)"
+    # Per-workspace reap decision (no unmerged work, no unsaved edits,
+    # aged out, or orphaned dir) lives in jj-toolbox/bin/jj-ws-gc — not
     # duplicated here anymore. This loop fans it out and sums the totals.
     local reaped=0 kept=0
     for repo in $targets; do
@@ -607,7 +607,7 @@ cmd_workspace_gc() {
             esac
         done <<<"$out"
     done
-    gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (has content, described, or too new)."
+    gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (unmerged work, unsaved edits, or too new)."
 }
 
 # --- dispatch ---
