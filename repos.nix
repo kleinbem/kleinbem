@@ -35,4 +35,5 @@
   mesh-llm-ci = "git@github.com:kleinbem/mesh-llm-ci.git";
   mesh-llm-gpu = "git@github.com:kleinbem/mesh-llm-gpu.git";
   chrome-open-in-app = "git@github.com:kleinbem/chrome-open-in-app.git";
+  aur-packages = "git@github.com:kleinbem/aur-packages.git";
 }
