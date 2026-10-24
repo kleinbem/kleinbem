@@ -16,6 +16,10 @@ status-all filter="":
     @just jj::status-all {{filter}}
 
 [group("Main")]
+clean *args="":
+    @just jj::clean {{args}}
+
+[group("Main")]
 save-all message="" filter="":
     @just jj::save-all "{{message}}" {{filter}}
 

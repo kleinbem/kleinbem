@@ -44,6 +44,7 @@ hub:
         "ship-all         — describe + sign + push (the everything button)" \
         "─────────────────────────────────────────────" \
         "status-all       — repo state + ahead-of-origin counts" \
+        "clean            — is everything clean? dirty/unpushed/workspaces/PRs/branches" \
         "diff-all         — uncommitted changes across the workspace" \
         "remote-status    — GitHub dashboard (CI, PRs, issues)" \
         "remote-prs       — open PRs across the workspace" \
@@ -62,6 +63,7 @@ hub:
     case "$choice" in
         ship-all*)          msg=$(gum input --header "Ship message" --placeholder "feat(...): ..."); just jj::ship-all "$msg" ;;
         status-all*)        just jj::status-all ;;
+        clean*)             just jj::clean ;;
         diff-all*)          just jj::diff-all ;;
         remote-status*)     just jj::remote-status ;;
         remote-prs*)        just jj::remote-prs ;;
@@ -87,6 +89,19 @@ hub:
 [group("Status")]
 status-all filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh status-all {{filter}}
+
+# "Is the fleet clean enough to start new work?" — one row per repo:
+# working-copy data (files changed in @), commits ahead of origin,
+# conflicts, open jj agent workspaces, open PRs, open issues (info only),
+# and GitHub branches other than main/production; ✅ per repo + a verdict.
+# GitHub side is one batched GraphQL call (~1-2s). Flags:
+#   --local    skip GitHub, local checks only
+#   --strict   exit 1 when anything is unclean (for scripts/CI)
+#   just jj::clean                 # whole fleet
+#   just jj::clean nix --local     # nix* repos, no network
+[group("Status")]
+clean *args="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh clean {{args}}
 
 # GitHub remote dashboard — origin/main SHA, latest CI status,
 # open PR count, open issue count per repo. ~6s due to gh API roundtrips.
