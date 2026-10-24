@@ -20,6 +20,10 @@ clean *args="":
     @just jj::clean {{args}}
 
 [group("Main")]
+abandon-merged *args="":
+    @just jj::abandon-merged {{args}}
+
+[group("Main")]
 save-all message="" filter="":
     @just jj::save-all "{{message}}" {{filter}}
 

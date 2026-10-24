@@ -2,7 +2,7 @@
 # jj-fleet — Nix-packaged subset of the jj dashboard (kleinbem/flake.nix,
 # writeShellApplication: pinned runtimeInputs + shellcheck-gated build).
 #
-# Covers the read-only/safe recipes only: status-all, clean, diff-all,
+# Covers the read-only/safe recipes only: status-all, clean, abandon-merged, diff-all,
 # remote-status, remote-prs, remote-ci, check-signatures, bootstrap,
 # init-bookmarks, sweep-merged. Everything with real mutation logic
 # (save-all, push-all, ship-all, sign-unsigned, ...) is still in
@@ -254,10 +254,14 @@ cmd_pull_all() {
     # Per-repo fetch+rebase (with the credential-helper override that
     # dodges the oauth-device-flow hang) lives in jj-toolbox/bin/jj-pull —
     # not duplicated here anymore.
+    # jj-pull also runs jj-abandon-merged after the rebase; its one-line
+    # summary is the only output worth surfacing per repo.
     for repo in $targets; do
-        local name="$repo" rpath="$ROOT/$repo"
-        gum spin --spinner dot --title "$name..." -- \
-            bash -c "cd '$rpath' && '$ROOT/jj-toolbox/bin/jj-pull' >/dev/null 2>&1 || true"
+        local name="$repo" rpath="$ROOT/$repo" out summary
+        out=$(gum spin --spinner dot --title "$name..." --show-output -- \
+            bash -c "cd '$rpath' && '$ROOT/jj-toolbox/bin/jj-pull' 2>&1 || true")
+        summary=$(printf '%s\n' "$out" | grep -E '^Abandoned [0-9]+ commit' || true)
+        [ -n "$summary" ] && gum style --foreground 244 "  $name: $summary"
     done
     gum style --foreground 46 --margin "1 0" "✅ pull-all complete. Run: just jj::status-all"
 }
@@ -529,15 +533,17 @@ cmd_branch_all() {
 # since the git backend is shared with the primary checkout.
 cmd_workspace_new() {
     local repo="${1:?repo required}" name="${2:-}"
+    shift; [ $# -gt 0 ] && shift
+    # Anything left (e.g. `-r <change-id>`) is handed to jj-ws-new as is.
     local dir="$ROOT/$repo"
     [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo"; exit 1; }
     # Resolve the name here (rather than letting jj-ws-new auto-generate
     # one) so this can print the exact path without parsing its output.
     [ -z "$name" ] && name="ws-$(date +%H%M%S)-$RANDOM"
     local ws_path="${dir}.ws/$name"
-    # Workspace creation (mkdir, jj workspace add -r trunk(), .envrc copy)
+    # Workspace creation (mkdir, jj workspace add -r trunk() or -r <rev>, .envrc copy)
     # lives in jj-toolbox/bin/jj-ws-new — not duplicated here anymore.
-    if (cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-new" "$name") >/dev/null 2>&1; then
+    if (cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-new" "$name" "$@") >/dev/null 2>&1; then
         gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
         gum style --foreground 212 "   cd $ws_path"
     else
@@ -608,6 +614,51 @@ cmd_workspace_gc() {
         done <<<"$out"
     done
     gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (unmerged work, unsaved edits, or too new)."
+}
+
+# --- abandon-merged ---
+# Drop the local copies of changes that already landed on main, fleet-wide.
+# Per-repo proof (files identical on trunk / identical patch / exact merged
+# PR head) lives in jj-toolbox/bin/jj-abandon-merged — this loop fans it
+# out, re-decorates rows with a REPO column, and sums the totals.
+cmd_abandon_merged() {
+    local filter="" dry=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --dry-run) dry=1; shift ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets title="🧽 Abandoning local copies of merged changes"
+    [ "$dry" -eq 1 ] && title="🧽 Local copies of merged changes (dry run)"
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "$title"
+    local rows=("REPO	REASON	COMMIT	SUBJECT") n=0 repos=0
+    for repo in $targets; do
+        local dir="$ROOT/$repo" out flag=""
+        [ -d "$dir" ] || continue
+        [ "$dry" -eq 1 ] && flag="--dry-run"
+        # shellcheck disable=SC2086 # $flag is intentionally empty or one flag
+        out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-abandon-merged" --tsv $flag 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        repos=$((repos + 1))
+        while IFS=$'	' read -r why commit subject; do
+            [ -z "$why" ] && continue
+            n=$((n + 1))
+            rows+=("$(printf '%s	%s	%s	%.60s' "$repo" "$why" "$commit" "$subject")")
+        done <<<"$out"
+    done
+    if [ "$n" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ No local copy of a merged change anywhere in scope."
+        return
+    fi
+    printf '%s
+' "${rows[@]}" | column -t -s "$(printf '	')"
+    if [ "$dry" -eq 1 ]; then
+        gum style --foreground 220 --margin "1 0" "Dry run — $n commit(s) in $repos repo(s) would be abandoned. Run without --dry-run to do it."
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Abandoned $n commit(s) in $repos repo(s). Undo per repo: jj op undo"
+    fi
 }
 
 # --- clean ---
@@ -738,7 +789,7 @@ cmd_clean() {
         gum style --foreground 46 "✅ ALL CLEAN — safe to start new work."
     else
         gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
-        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → push-all, or jj abandon if already merged · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged"
+        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → just abandon-merged (proven copies) then push-all · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged"
         [ "$strict" -eq 1 ] && return 1
     fi
     return 0
@@ -751,6 +802,7 @@ shift
 case "$subcommand" in
 status-all) cmd_status_all "$@" ;;
 clean) cmd_clean "$@" ;;
+abandon-merged) cmd_abandon_merged "$@" ;;
 remote-status) cmd_remote_status "$@" ;;
 remote-prs) cmd_remote_prs "$@" ;;
 remote-ci) cmd_remote_ci "$@" ;;
@@ -771,7 +823,7 @@ workspace-list) cmd_workspace_list "$@" ;;
 workspace-gc) cmd_workspace_gc "$@" ;;
 *)
     echo "Unknown subcommand: $subcommand" >&2
-    echo "Available: status-all clean diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
+    echo "Available: status-all clean abandon-merged diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
     exit 1
     ;;
 esac
