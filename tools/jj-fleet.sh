@@ -2,7 +2,7 @@
 # jj-fleet — Nix-packaged subset of the jj dashboard (kleinbem/flake.nix,
 # writeShellApplication: pinned runtimeInputs + shellcheck-gated build).
 #
-# Covers the read-only/safe recipes only: status-all, diff-all,
+# Covers the read-only/safe recipes only: status-all, clean, diff-all,
 # remote-status, remote-prs, remote-ci, check-signatures, bootstrap,
 # init-bookmarks, sweep-merged. Everything with real mutation logic
 # (save-all, push-all, ship-all, sign-unsigned, ...) is still in
@@ -610,12 +610,147 @@ cmd_workspace_gc() {
     gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (unmerged work, unsaved edits, or too new)."
 }
 
+# --- clean ---
+# One table answering "is the fleet clean enough to start new work?". Per
+# repo: working-copy data (files changed in @, described or not), non-empty
+# commits not in trunk (any workspace or orphaned head), conflicted commits, open jj agent workspaces, and — unless
+# --local — GitHub open PRs, open issues, and branches other than the
+# long-lived ones below, all fetched in ONE GraphQL request (aliases r0..rN)
+# instead of one `gh` roundtrip per repo per field. Nothing here fetches or
+# mutates any repo.
+#
+# Verdict: a repo is ✅ only when every local column is zero and it has no
+# open PRs and no extra branches. Open issues are shown but don't count —
+# they're backlog, not clutter. Exit code is 0 regardless unless --strict,
+# so `just` recipes stay quiet and CI can still gate on it.
+CLEAN_ALLOWED_BRANCHES="main production" # long-lived branches that never count as clutter
+
+cmd_clean() {
+    local filter="" local_only=0 strict=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --local) local_only=1; shift ;;
+        --strict) strict=1; shift ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧼 Fleet clean check"
+
+    declare -A gh_prs gh_issues gh_branches
+    local repo i
+    if [ "$local_only" -eq 0 ]; then
+        local q="" json=""
+        i=0
+        for repo in $targets; do
+            q+="r$i: repository(owner:\"kleinbem\", name:\"$repo\") { pullRequests(states:OPEN){totalCount} issues(states:OPEN){totalCount} refs(refPrefix:\"refs/heads/\", first:100){nodes{name}} } "
+            i=$((i + 1))
+        done
+        json=$(gum spin --spinner dot --title "Querying GitHub..." --show-output -- \
+            gh api graphql -f query="{ $q }" 2>/dev/null) || json=""
+        i=0
+        for repo in $targets; do
+            if [ -n "$json" ]; then
+                gh_prs[$repo]=$(jq -r ".data.r$i.pullRequests.totalCount // \"?\"" <<<"$json")
+                gh_issues[$repo]=$(jq -r ".data.r$i.issues.totalCount // \"?\"" <<<"$json")
+                gh_branches[$repo]=$( (jq -r ".data.r$i.refs.nodes[].name" <<<"$json" || true) \
+                    | grep -vxF -f <(tr ' ' '\n' <<<"$CLEAN_ALLOWED_BRANCHES") | paste -sd, - || true)
+            else
+                gh_prs[$repo]="?"
+                gh_issues[$repo]="?"
+                gh_branches[$repo]="?"
+            fi
+            i=$((i + 1))
+        done
+    fi
+
+    local n_repos=0 n_dirty=0 n_dirtyfiles=0 n_ahead=0 n_conflicts=0 n_ws=0 n_prs=0 n_issues=0 n_branches=0 n_unclean=0
+    local rows=()
+    if [ "$local_only" -eq 1 ]; then
+        rows+=("$(printf 'REPO\tWORKING COPY\tNOT IN MAIN\tCONFLICTS\tJJ WS\tOK')")
+    else
+        rows+=("$(printf 'REPO\tWORKING COPY\tNOT IN MAIN\tCONFLICTS\tJJ WS\tPRs\tISSUES\tEXTRA BRANCHES\tOK')")
+    fi
+    for repo in $targets; do
+        local dir="$ROOT/$repo" change state ahead_raw ahead=0 files=0 conflicts=0 ws=0 wc ok=1 n
+        n_repos=$((n_repos + 1))
+        if [ ! -d "$dir" ]; then
+            wc="(not cloned)"; ahead="-"; conflicts="-"; ws="-"
+        else
+            IFS=$'\t' read -r change state ahead_raw < <(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ahead" --tsv 2>/dev/null) || ahead_raw="?"
+            : "$change" "$ahead_raw"
+            # Everything not yet in trunk — in this working copy, in any
+            # agent workspace, or left behind as an orphaned head (e.g. a
+            # local copy of a change that was squash-merged on GitHub, or
+            # a rebase leftover). jj-ahead only counts trunk()..@ of the
+            # default workspace, which misses the other two.
+            ahead=$(cd "$dir" && jj log -r 'mutable() & ~empty()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
+            files=$(cd "$dir" && jj diff -r @ --summary 2>/dev/null | grep -c . || true)
+            conflicts=$(cd "$dir" && jj log -r 'conflicts() & mutable()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
+            ws=$(cd "$dir" && jj workspace list -T 'name ++ "\n"' 2>/dev/null | grep -vc '^default$' || true)
+            local plural="s"
+            [ "$files" -eq 1 ] && plural=""
+            if [ "$files" -eq 0 ]; then
+                wc="✓"
+            elif [ "$state" = "UNDESCRIBED" ]; then
+                wc="⚠ $files file$plural, undescribed"
+            else
+                wc="📝 $files file$plural, described"
+            fi
+            [ "$files" -gt 0 ] && { n_dirty=$((n_dirty + 1)); n_dirtyfiles=$((n_dirtyfiles + files)); ok=0; }
+            [ "$ahead" -gt 0 ] && { n_ahead=$((n_ahead + ahead)); ok=0; }
+            [ "$conflicts" -gt 0 ] && { n_conflicts=$((n_conflicts + conflicts)); ok=0; }
+            [ "$ws" -gt 0 ] && { n_ws=$((n_ws + ws)); ok=0; }
+            [ "$ahead" -eq 0 ] && ahead="-"
+            [ "$conflicts" -eq 0 ] && conflicts="-"
+            [ "$ws" -eq 0 ] && ws="-"
+        fi
+        local prs issues branches
+        if [ "$local_only" -eq 0 ]; then
+            prs="${gh_prs[$repo]}"; issues="${gh_issues[$repo]}"; branches="${gh_branches[$repo]}"
+            case "$prs" in ''|'?'|0) : ;; *) n_prs=$((n_prs + prs)); ok=0 ;; esac
+            case "$issues" in ''|'?'|0) : ;; *) n_issues=$((n_issues + issues)) ;; esac
+            if [ -n "$branches" ] && [ "$branches" != "?" ]; then
+                n_branches=$((n_branches + $(tr ',' '\n' <<<"$branches" | grep -c .)))
+                ok=0
+            fi
+            [ "$prs" = "0" ] && prs="-"
+            [ "$issues" = "0" ] && issues="-"
+            [ -z "$branches" ] && branches="-"
+        fi
+        [ "$ok" -eq 0 ] && n_unclean=$((n_unclean + 1))
+        local mark="✅"
+        [ "$ok" -eq 0 ] && mark="⚠"
+        if [ "$local_only" -eq 1 ]; then
+            rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$repo" "$wc" "$ahead" "$conflicts" "$ws" "$mark")")
+        else
+            rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$repo" "$wc" "$ahead" "$conflicts" "$ws" "$prs" "$issues" "$branches" "$mark")")
+        fi
+    done
+    printf '%s\n' "${rows[@]}" | column -t -s "$(printf '\t')"
+
+    echo
+    local summary="repos: $n_repos · dirty working copies: $n_dirty ($n_dirtyfiles files) · commits not in main: $n_ahead · conflicts: $n_conflicts · jj workspaces: $n_ws"
+    [ "$local_only" -eq 0 ] && summary+=" · open PRs: $n_prs · extra branches: $n_branches · open issues: $n_issues (info only)"
+    gum style --foreground 245 "$summary"
+    if [ "$n_unclean" -eq 0 ]; then
+        gum style --foreground 46 "✅ ALL CLEAN — safe to start new work."
+    else
+        gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
+        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → push-all, or jj abandon if already merged · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged"
+        [ "$strict" -eq 1 ] && return 1
+    fi
+    return 0
+}
+
 # --- dispatch ---
 subcommand="${1:-}"
 [ -n "$subcommand" ] || { echo "Usage: jj-fleet <subcommand> [args...]" >&2; exit 1; }
 shift
 case "$subcommand" in
 status-all) cmd_status_all "$@" ;;
+clean) cmd_clean "$@" ;;
 remote-status) cmd_remote_status "$@" ;;
 remote-prs) cmd_remote_prs "$@" ;;
 remote-ci) cmd_remote_ci "$@" ;;
@@ -636,7 +771,7 @@ workspace-list) cmd_workspace_list "$@" ;;
 workspace-gc) cmd_workspace_gc "$@" ;;
 *)
     echo "Unknown subcommand: $subcommand" >&2
-    echo "Available: status-all diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
+    echo "Available: status-all clean diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
     exit 1
     ;;
 esac
