@@ -45,6 +45,7 @@ hub:
         "─────────────────────────────────────────────" \
         "status-all       — repo state + ahead-of-origin counts" \
         "clean            — is everything clean? dirty/unpushed/workspaces/PRs/branches" \
+        "abandon-merged   — drop local copies of changes already on main (proven only)" \
         "diff-all         — uncommitted changes across the workspace" \
         "remote-status    — GitHub dashboard (CI, PRs, issues)" \
         "remote-prs       — open PRs across the workspace" \
@@ -64,6 +65,7 @@ hub:
         ship-all*)          msg=$(gum input --header "Ship message" --placeholder "feat(...): ..."); just jj::ship-all "$msg" ;;
         status-all*)        just jj::status-all ;;
         clean*)             just jj::clean ;;
+        abandon-merged*)    just jj::abandon-merged ;;
         diff-all*)          just jj::diff-all ;;
         remote-status*)     just jj::remote-status ;;
         remote-prs*)        just jj::remote-prs ;;
@@ -139,6 +141,17 @@ diff-all filter="" *args="":
 check-signatures filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh check-signatures {{filter}}
 
+# Drop the local copies of changes that already landed on main — the
+# orphans every squash-merged PR leaves behind. Only provable cases go
+# (files identical on trunk, identical patch, or exact merged-PR head);
+# conflicts, live workspace @s and anything unproven stay. jj-pull runs the
+# same step after every fetch, so this is for catching up without pulling.
+#   just jj::abandon-merged --dry-run      # show, don't touch
+#   just jj::abandon-merged nix-           # only nix-* repos
+[group("Sync")]
+abandon-merged *args="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh abandon-merged {{args}}
+
 # Fetch+prune every repo in scope and report local branches other than
 # main: merged (safe to forget) vs. unclear (needs a manual look) vs.
 # `gh pr checkout` residue. Read-only — never deletes anything itself,
@@ -159,7 +172,8 @@ sign-unsigned filter="":
 
 # --- Sync ---
 
-# Fetch from origin in every repo in scope and rebase the working-copy change.
+# Fetch from origin in every repo in scope, rebase the working-copy change,
+# and drop local copies of changes that landed on main (jj-abandon-merged).
 [group("Sync")]
 pull-all filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh pull-all {{filter}}
@@ -260,11 +274,14 @@ branch-all name filter="":
 # push/pull still work from any workspace via the shared git backend.
 
 # Create a fresh workspace for one repo and print the path to cd into.
+# Every agent session that edits a repo works in one of these; the primary
+# checkout is Martin's.
 #   just jj::ws-new nix-config           # auto-named ws-<time>-<rand>
 #   just jj::ws-new nix-config agentB    # explicit name
+#   just jj::ws-new nix-config agentB -r <change-id>   # start on an existing change
 [group("Agent workspaces")]
-ws-new repo name="":
-    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-new {{repo}} {{name}}
+ws-new repo name="" *args="":
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-new {{repo}} {{name}} {{args}}
 
 # List every open agent workspace fleet-wide (or filtered) with its @ state.
 [group("Agent workspaces")]
