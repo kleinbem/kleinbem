@@ -29,7 +29,6 @@
   github-config = "git@github.com:kleinbem/github-config.git";
   kleinbem-secrets = "git@github.com:kleinbem/kleinbem-secrets.git";
   kleinbem-site = "git@github.com:kleinbem/kleinbem-site.git";
-  kleinbem-auth = "git@github.com:kleinbem/kleinbem-auth.git";
   ".github" = "git@github.com:kleinbem/.github.git";
   jj-toolbox = "git@github.com:kleinbem/jj-toolbox.git";
   nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
