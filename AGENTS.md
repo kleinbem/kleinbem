@@ -19,6 +19,7 @@ This file, and the root workspace `CLAUDE.md`, are the real orientation.
 | `repos.nix` | Every fleet repo + GitHub URL — single source of truth for `just bootstrap`/dashboard/fan-out. |
 | `.just/common.just`, `.just/jj.just` | Canonical fleet-wide `just` recipes, symlinked into `nix/` and `openwrt/`. |
 | `tools/jj-fleet.sh` | Dashboard implementation; fans out to `jj-toolbox`'s per-repo scripts rather than reimplementing jj primitives. |
+| `root/` | The workspace root's own `CLAUDE.md`, `justfile`, `.envrc`. The root isn't a repo, so it holds symlinks to these; `just bootstrap` creates them (`tools/link-root-files.sh`). |
 | `tools/resolve-targets.sh` | Filter-matching logic every `*-all` recipe uses — has real tests. |
 | `docs/` | ADRs and maintenance runbooks (e.g. `ADR-WAYPIPE-PLATFORM-SEPARATION.md`, `MAINTENANCE-RUNBOOKS.md`). |
 | `tests/` | `bash kleinbem/tests/test-*.sh`, or `just test` from this repo. |
@@ -26,5 +27,5 @@ This file, and the root workspace `CLAUDE.md`, are the real orientation.
 ## Conventions
 
 - This is a tooling-only repo — real Nix/OpenWrt work happens in the sibling repos it fans out to, never here.
-- Changes to `.just/common.just`/`.just/jj.just` affect `nix/` and `openwrt/` too (symlinked, not copied) — check both conductors after editing.
+- Changes to `.just/common.just`/`.just/jj.just` affect `nix/`, `openwrt/` and the root justfile too (symlinked or imported, not copied) — check them after editing.
 - Run `cd kleinbem && just test` after touching `tools/resolve-targets.sh` or the fan-out logic.

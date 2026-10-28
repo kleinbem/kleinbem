@@ -31,6 +31,7 @@
           pkgs.gh
           pkgs.jq
           pkgs.coreutils
+          pkgs.diffutils # cmp (link-root-files.sh)
           pkgs.util-linux # column
         ];
         text = builtins.readFile ./tools/jj-fleet.sh;

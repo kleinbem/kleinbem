@@ -7,11 +7,14 @@
 # including the three former "conductors" (nix, openwrt, kleinbem) as regular
 # entries. Nothing here is nix-specific or openwrt-specific.
 
-# Get the absolute path to the workspace root (parent of the conductor dir).
-# Only valid for files living exactly one level below the root (nix/,
-# openwrt/, kleinbem/) — see kleinbem/tools/jj-fleet.sh's find_root() for the
-# general walk-up version used everywhere else (works from any depth).
-ROOT := parent_directory(justfile_directory())
+# Absolute path to the workspace root. Two valid callers: a conductor one
+# level below the root (nix/, openwrt/, kleinbem/ -> the parent), and the
+# root justfile itself (a symlink to kleinbem/root/justfile; just uses the
+# symlink's directory, and inside a `mod` justfile_directory() is the
+# importing root justfile's directory). The root is recognised by
+# kleinbem/repos.nix sitting right below it. See kleinbem/tools/jj-fleet.sh's
+# find_root() for the walk-up version used outside just (works from any depth).
+ROOT := if path_exists(justfile_directory() / "kleinbem" / "repos.nix") == "true" { justfile_directory() } else { parent_directory(justfile_directory()) }
 
 # Every repo in the fleet-wide manifest (kleinbem/repos.nix) — flat, no
 # categorization. Used as-is: no per-conductor default scope anymore, every

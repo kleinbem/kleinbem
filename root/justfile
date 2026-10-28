@@ -1,0 +1,145 @@
+# Workspace-root justfile. ~/Develop/github.com/kleinbem/ itself is NOT a
+# repo (no .git/.jj), just the directory holding every real repo as flat
+# siblings. The root's `justfile` is a symlink to kleinbem/root/justfile
+# (`just bootstrap` creates it), so the fleet dashboard and the jj:: module
+# work from here without `cd kleinbem` first.
+#
+# Imports the same shared modules as kleinbem/, nix/ and openwrt/.
+# common.just detects that it's running from the root (kleinbem/repos.nix
+# sits right below) and sets ROOT to this directory instead of its parent.
+# No domain concept anywhere: every repo is a peer, status-all (and friends)
+# default to the whole fleet from any location.
+import 'kleinbem/.just/common.just'
+
+# --- Modules ---
+
+# Fleet jj recipes: ws-new/ws-list/ws-gc, push-all, ...
+mod jj 'kleinbem/.just/jj.just'
+
+[group("Main")]
+default:
+    @just jj::hub
+
+[group("Main")]
+status-all filter="":
+    @just jj::status-all {{filter}}
+
+[group("Main")]
+clean *args="":
+    @just jj::clean {{args}}
+
+[group("Main")]
+abandon-merged *args="":
+    @just jj::abandon-merged {{args}}
+
+[group("Main")]
+diff-all filter="" *args="":
+    @just jj::diff-all {{filter}} {{args}}
+
+[group("Main")]
+remote-status filter="":
+    @just jj::remote-status {{filter}}
+
+[group("Main")]
+remote-prs filter="":
+    @just jj::remote-prs {{filter}}
+
+[group("Main")]
+remote-ci limit="5" filter="":
+    @just jj::remote-ci {{limit}} {{filter}}
+
+[group("Main")]
+check-signatures filter="":
+    @just jj::check-signatures {{filter}}
+
+[group("Main")]
+save-all message="" filter="":
+    @just jj::save-all "{{message}}" {{filter}}
+
+[group("Main")]
+ship-all message="" filter="":
+    @just jj::ship-all "{{message}}" {{filter}}
+
+alias ship := ship-all
+
+[group("Main")]
+pull-all filter="":
+    @just jj::pull-all {{filter}}
+
+[group("Main")]
+push-all filter="":
+    @just jj::push-all {{filter}}
+
+[group("Main")]
+sign-unsigned filter="":
+    @just jj::sign-unsigned {{filter}}
+
+[group("Main")]
+bootstrap filter="":
+    @just jj::bootstrap {{filter}}
+
+[group("Main")]
+init-bookmarks filter="":
+    @just jj::init-bookmarks {{filter}}
+
+# Usage:
+#   just in nix-config nixos::switch
+#   just in openwrt-config check core-gateway
+# Pass-through to any repo's own justfile
+[group("Main")]
+in repo *args:
+    @cd {{ROOT}}/{{repo}} && just {{args}}
+
+[group("Maintenance")]
+audit-versions filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Scanning fleet for pinned package versions..."
+    echo ""
+    for repo in {{ROOT}}/nix-*/ {{ROOT}}/openwrt-*/; do
+        [ -d "$repo" ] || continue
+        repo_name=$(basename "$repo")
+        matches=$(grep -r "Version.*=\|version.*=" "$repo" --include="*.nix" 2>/dev/null | grep -E "(platform|build|tools|cmdLine).*Version.*=.*[0-9]+\.[0-9]+" | grep "{{filter}}" || true)
+        if [ -n "$matches" ]; then
+            echo "📦 $repo_name:"
+            echo "$matches" | sed 's/^/  /'
+            echo ""
+        fi
+    done
+    echo "✓ Version audit complete"
+
+[group("Maintenance")]
+check-flake-lock-age:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📅 Checking flake.lock freshness..."
+    echo ""
+    for lock in {{ROOT}}/*/flake.lock; do
+        repo_name=$(basename "$(dirname "$lock")")
+        days_old=$(( ($(date +%s) - $(stat -c %Y "$lock")) / 86400 ))
+        updated_date=$(stat -c %y "$lock" | cut -d' ' -f1)
+        if [ "$days_old" -gt 30 ]; then
+            echo "⚠️  $repo_name: $days_old days old ($updated_date)"
+        elif [ "$days_old" -gt 14 ]; then
+            echo "📋 $repo_name: $days_old days old ($updated_date)"
+        else
+            echo "✅ $repo_name: $days_old days old ($updated_date)"
+        fi
+    done
+    echo ""
+    echo "💡 Tip: Run 'just in <repo> flake update' to refresh stale locks"
+
+[group("Maintenance")]
+audit-transitive-deps filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔗 Scanning transitive dependencies for major version changes..."
+    echo ""
+    for repo in {{ROOT}}/nix-*/; do
+        repo_name=$(basename "$repo")
+        if echo "$repo_name" | grep -q "{{filter}}"; then
+            {{ROOT}}/kleinbem/tools/audit-transitive-deps.sh "$repo" || true
+            echo ""
+        fi
+    done
+    echo "✓ Transitive dependency audit complete"
