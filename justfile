@@ -70,7 +70,8 @@ test:
     #!/usr/bin/env bash
     set -e
     failed=0
-    for t in {{ROOT}}/kleinbem/tests/test-*.sh; do
+    # This checkout's own tests, so agent workspaces test their changes.
+    for t in {{justfile_directory()}}/tests/test-*.sh; do
         echo "── $(basename "$t") ──"
         bash "$t" || failed=1
         echo
