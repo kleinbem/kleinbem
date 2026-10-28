@@ -1,7 +1,8 @@
 # Fleet-Wide Hub — kleinbem/ is the workspace root/profile repo. Every
 # fan-out recipe defaults to the whole fleet (no domain concept — see
 # kleinbem/.just/common.just); same behavior from nix/, openwrt/, or the
-# bare workspace root (~/Develop/github.com/kleinbem/justfile).
+# bare workspace root (~/Develop/github.com/kleinbem/justfile, a symlink to
+# root/justfile here).
 import '.just/common.just'
 
 # --- Modules ---

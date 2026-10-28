@@ -230,6 +230,10 @@ cmd_bootstrap() {
             gum style --foreground 46 "  ✓ $repo cloned + jj-initialised"
         fi
     done
+    # Root files (CLAUDE.md, justfile, .envrc) are symlinks into kleinbem/root/.
+    # A differing local file is reported, not overwritten — don't fail the run.
+    gum style --foreground 212 "🔗 Workspace-root links"
+    bash "$ROOT/kleinbem/tools/link-root-files.sh" "$ROOT" || true
     gum style --foreground 46 --margin "1 0" "✅ Workspace bootstrapped."
 }
 
