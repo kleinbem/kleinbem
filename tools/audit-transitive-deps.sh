@@ -31,7 +31,7 @@ get_nixpkgs_rev() {
   if [ ! -f "$lock_file" ]; then
     return 1
   fi
-  jq -r '.nodes.nixpkgs.locked.rev' "$lock_file" 2>/dev/null || echo ""
+  jq -r '.nodes[.nodes.root.inputs.nixpkgs].locked.rev' "$lock_file" 2>/dev/null || echo ""
 }
 
 # Helper: Get package version from nixpkgs at a given revision
