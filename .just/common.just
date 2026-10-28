@@ -12,9 +12,11 @@
 # root justfile itself (a symlink to kleinbem/root/justfile; just uses the
 # symlink's directory, and inside a `mod` justfile_directory() is the
 # importing root justfile's directory). The root is recognised by
-# kleinbem/repos.nix sitting right below it. See kleinbem/tools/jj-fleet.sh's
-# find_root() for the walk-up version used outside just (works from any depth).
-ROOT := if path_exists(justfile_directory() / "kleinbem" / "repos.nix") == "true" { justfile_directory() } else { parent_directory(justfile_directory()) }
+# kleinbem/repos.nix sitting right below it and by not being a repo itself:
+# nix/ has a kleinbem -> ../kleinbem symlink, so repos.nix alone matches there
+# too. See kleinbem/tools/jj-fleet.sh's find_root() for the walk-up version
+# used outside just (works from any depth).
+ROOT := if path_exists(justfile_directory() / "kleinbem" / "repos.nix") == "true" { if path_exists(justfile_directory() / ".jj") == "false" { justfile_directory() } else { parent_directory(justfile_directory()) } } else { parent_directory(justfile_directory()) }
 
 # Every repo in the fleet-wide manifest (kleinbem/repos.nix) — flat, no
 # categorization. Used as-is: no per-conductor default scope anymore, every

@@ -25,7 +25,8 @@ set -euo pipefail
 find_root() {
     local dir="$PWD"
     while [ "$dir" != "/" ]; do
-        if [ -f "$dir/kleinbem/repos.nix" ]; then
+        # Skip repos: nix/ has a kleinbem -> ../kleinbem symlink.
+        if [ -f "$dir/kleinbem/repos.nix" ] && [ ! -d "$dir/.jj" ]; then
             printf '%s\n' "$dir"
             return 0
         fi
