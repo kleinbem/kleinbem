@@ -41,6 +41,27 @@ ROOT="${ROOT:-$(find_root)}"
 ALL_REPOS=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
     --apply 'rs: builtins.concatStringsSep " " (builtins.attrNames rs)' 2>/dev/null || true)
 
+# "name url" per repo, so gh_repo_of needs no nix eval per call.
+# shellcheck disable=SC2016 # ${n} is Nix interpolation, not shell
+ALL_REPO_URLS="$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
+    --apply 'rs: builtins.concatStringsSep "\n" (map (n: "${n} ${rs.${n}}") (builtins.attrNames rs))' 2>/dev/null || true)"
+export ALL_REPO_URLS
+
+# GitHub "owner/name" of a repo, from its URL in repos.nix: repos live under
+# the kleinbem user or the kleinbem-dev org (nix-gantry since 2026-10-29), so
+# the owner is never assumed. Exported for the `bash -c` children below.
+gh_repo_of() {
+    local name u url=""
+    while read -r name u; do
+        [ "$name" = "$1" ] && { url="$u"; break; }
+    done <<<"$ALL_REPO_URLS"
+    url="${url#git@github.com:}"
+    url="${url#https://github.com/}"
+    url="${url%.git}"
+    echo "${url:-kleinbem/$1}"
+}
+export -f gh_repo_of
+
 resolve_targets() {
     # shellcheck disable=SC2086 # intentional word-splitting of ALL_REPOS
     bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $ALL_REPOS
@@ -95,7 +116,7 @@ cmd_remote_status() {
             printf "REPO\tMAIN\tCI\tPRs\tISSUES\n"
             for repo in $targets; do
                 name="$repo"
-                ghrepo="kleinbem/$repo"
+                ghrepo=$(gh_repo_of "$repo")
                 sha=$(git -C "$ROOT/$repo" rev-parse --short origin/main 2>/dev/null || echo "?")
                 ci=$(gh run list --repo "$ghrepo" --branch main --limit 1 --json conclusion,status \
                     --jq ".[0] | if .status==\"in_progress\" then \"🔄\" elif .conclusion==\"success\" then \"✅\" elif .conclusion==\"failure\" then \"❌\" elif .conclusion==\"cancelled\" then \"⏹\" else \"?\" end" 2>/dev/null || echo "—")
@@ -120,7 +141,7 @@ cmd_remote_prs() {
             printf "REPO\t#\tTITLE\tAUTHOR\n"
             for repo in $targets; do
                 name="$repo"
-                ghrepo="kleinbem/$repo"
+                ghrepo=$(gh_repo_of "$repo")
                 gh pr list --repo "$ghrepo" --state open --json number,title,author \
                     --jq ".[] | \"$name\t#\(.number)\t\(.title)\t@\(.author.login)\"" 2>/dev/null || true
             done
@@ -146,7 +167,7 @@ cmd_remote_ci() {
             printf "REPO\tSTATUS\tWORKFLOW\tTITLE\n"
             for repo in $targets; do
                 name="$repo"
-                ghrepo="kleinbem/$repo"
+                ghrepo=$(gh_repo_of "$repo")
                 gh run list --repo "$ghrepo" --limit "$limit" --json conclusion,status,name,displayTitle \
                     --jq ".[] | \"$name\t\(if .status==\"in_progress\" then \"🔄\" elif .status==\"queued\" then \"⏳\" elif .conclusion==\"success\" then \"✅\" elif .conclusion==\"failure\" then \"❌\" elif .conclusion==\"cancelled\" then \"⏹\" elif .conclusion==\"skipped\" then \"⏭\" else \"?\" end)\t\(.name)\t\(.displayTitle)\"" 2>/dev/null || true
             done

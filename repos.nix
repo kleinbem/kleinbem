@@ -17,7 +17,7 @@
   kleinbem = "git@github.com:kleinbem/kleinbem.git";
   nix-config = "git@github.com:kleinbem/nix-config.git";
   nix-devshells = "git@github.com:kleinbem/nix-devshells.git";
-  nix-gantry = "git@github.com:kleinbem/nix-gantry.git";
+  nix-gantry = "git@github.com:kleinbem-dev/nix-gantry.git";
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
   nix-holds = "git@github.com:kleinbem/nix-holds.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
@@ -29,7 +29,7 @@
   github-config = "git@github.com:kleinbem/github-config.git";
   kleinbem-secrets = "git@github.com:kleinbem/kleinbem-secrets.git";
   kleinbem-site = "git@github.com:kleinbem/kleinbem-site.git";
-  ".github" = "git@github.com:kleinbem/.github.git";
+  ".github" = "git@github.com:kleinbem-dev/.github.git";
   jj-toolbox = "git@github.com:kleinbem/jj-toolbox.git";
   nix-toolbox = "git@github.com:kleinbem/nix-toolbox.git";
   skills = "git@github.com:kleinbem/skills.git";
@@ -39,5 +39,6 @@
   aur-packages = "git@github.com:kleinbem/aur-packages.git";
   actions = "git@github.com:kleinbem/actions.git";
   coderabbit = "git@github.com:kleinbem/coderabbit.git";
+  coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
   mesh-agents = "git@github.com:kleinbem/mesh-agents.git";
 }
