@@ -38,5 +38,6 @@
   chrome-open-in-app = "git@github.com:kleinbem/chrome-open-in-app.git";
   aur-packages = "git@github.com:kleinbem/aur-packages.git";
   actions = "git@github.com:kleinbem/actions.git";
+  coderabbit = "git@github.com:kleinbem/coderabbit.git";
   mesh-agents = "git@github.com:kleinbem/mesh-agents.git";
 }
