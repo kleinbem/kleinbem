@@ -424,7 +424,8 @@ cmd_push_all() {
     targets=$(resolve_targets "$filter")
     local failed=()
     for repo in $targets; do
-        local name="$repo" rpath="$ROOT/$repo" url="https://github.com/kleinbem/$repo.git"
+        local name="$repo" rpath="$ROOT/$repo" url
+        url="https://github.com/$(gh_repo_of "$repo").git"
         (
         cd "$rpath" 2>/dev/null || { gum style --foreground 196 "  ❌ $name (dir missing)"; exit 1; }
         target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
