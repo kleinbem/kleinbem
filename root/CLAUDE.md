@@ -40,7 +40,7 @@ Every conductor (and this root) exposes the same `just` recipes via the shared `
 ```bash
 just                    # interactive fzf hub (gum-based) — the easiest entry point
 just status-all [filter]     # repo state + ahead-of-origin counts
-just clean [filter] [--local] [--strict]  # all-clean check: dirty/unpushed/conflicts/jj workspaces/PRs/issues/extra branches + verdict
+just clean [filter] [--local] [--strict]  # all-clean check: dirty/unpushed/conflicts/jj workspaces/PRs/issues/extra branches/Claude rule files + verdict
 just abandon-merged [filter] [--dry-run]  # drop local copies of changes already on main (proven only); pull-all does this too
 just diff-all [filter]       # uncommitted changes across the fleet
 just remote-status [filter]  # GitHub dashboard: CI, PRs, issues (~6s, hits gh API)

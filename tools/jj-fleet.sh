@@ -697,6 +697,11 @@ cmd_abandon_merged() {
 # instead of one `gh` roundtrip per repo per field. Nothing here fetches or
 # mutates any repo.
 #
+# Below the table: Claude Code settings files that hold permission rules
+# (tools/claude-settings-audit.sh). Rules belong in the managed policy in
+# nix-config; a shared .claude/settings.json or a stray .claude/ in a
+# subfolder counts against the verdict, a settings.local.json is listed only.
+#
 # Verdict: a repo is ✅ only when every local column is zero and it has no
 # open PRs and no extra branches. Open issues are shown but don't count —
 # they're backlog, not clutter. Exit code is 0 regardless unless --strict,
@@ -808,15 +813,32 @@ cmd_clean() {
     done
     printf '%s\n' "${rows[@]}" | column -t -s "$(printf '\t')"
 
+    local claude_rows="" n_claude=0 n_claude_attn=0
+    claude_rows=$(bash "$ROOT/kleinbem/tools/claude-settings-audit.sh" "$ROOT" 2>/dev/null || true)
+    if [ -n "$filter" ] && [ -n "$claude_rows" ]; then
+        # Keep rows under a targeted repo or its workspaces.
+        claude_rows=$(awk -F'\t' -v t="$targets" 'BEGIN { n = split(t, r, /[[:space:]]+/) }
+            { for (i = 1; i <= n; i++) if (r[i] != "" && (index($3, r[i] "/") == 1 || index($3, r[i] ".ws/") == 1)) { print; next } }' <<<"$claude_rows")
+    fi
+    if [ -n "$claude_rows" ]; then
+        n_claude=$(grep -c . <<<"$claude_rows" || true)
+        n_claude_attn=$(awk -F'\t' '$1 != "local"' <<<"$claude_rows" | grep -c . || true)
+        echo
+        gum style --foreground 212 "Claude Code permission rules outside the managed policy"
+        { printf 'KIND\tRULES\tFILE\n'; printf '%s\n' "$claude_rows"; } | column -t -s "$(printf '\t')"
+    fi
+
     echo
     local summary="repos: $n_repos · dirty working copies: $n_dirty ($n_dirtyfiles files) · commits not in main: $n_ahead · conflicts: $n_conflicts · jj workspaces: $n_ws"
     [ "$local_only" -eq 0 ] && summary+=" · open PRs: $n_prs · extra branches: $n_branches · open issues: $n_issues (info only)"
+    summary+=" · claude rule files: $n_claude ($n_claude_attn to move)"
     gum style --foreground 245 "$summary"
-    if [ "$n_unclean" -eq 0 ]; then
+    if [ "$n_unclean" -eq 0 ] && [ "$n_claude_attn" -eq 0 ]; then
         gum style --foreground 46 "✅ ALL CLEAN — safe to start new work."
     else
-        gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
-        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → just abandon-merged (proven copies) then push-all · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged"
+        [ "$n_unclean" -gt 0 ] && gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
+        [ "$n_claude_attn" -gt 0 ] && gum style --foreground 214 "⚠ $n_claude_attn Claude settings file(s) hold rules outside the managed policy."
+        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → just abandon-merged (proven copies) then push-all · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged · claude rules → nix-config modules/nixos/files/claude-code-policy.json, then delete the file (workspace copies go with ws-gc or a rebase onto main)"
         [ "$strict" -eq 1 ] && return 1
     fi
     return 0
