@@ -19,7 +19,7 @@
   nix-devshells = "git@github.com:kleinbem/nix-devshells.git";
   nix-gantry = "git@github.com:kleinbem-dev/nix-gantry.git";
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
-  nix-holds = "git@github.com:kleinbem/nix-holds.git";
+  nix-holds = "git@github.com:kleinbem-dev/nix-holds.git";
   nix-holds-fleet = "git@github.com:kleinbem/nix-holds-fleet.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
   nix-presets = "git@github.com:kleinbem/nix-presets.git";
