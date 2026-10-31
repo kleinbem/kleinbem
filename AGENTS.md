@@ -21,6 +21,7 @@ This file, and the root workspace `CLAUDE.md`, are the real orientation.
 | `tools/jj-fleet.sh` | Dashboard implementation; fans out to `jj-toolbox`'s per-repo scripts rather than reimplementing jj primitives. |
 | `root/` | The workspace root's own `CLAUDE.md`, `justfile`, `.envrc`. The root isn't a repo, so it holds symlinks to these; `just bootstrap` creates them (`tools/link-root-files.sh`). |
 | `tools/resolve-targets.sh` | Filter-matching logic every `*-all` recipe uses — has real tests. |
+| `tools/claude-settings-audit.sh` | Lists Claude Code settings files holding permission rules outside the managed policy; `just clean` shows them. Tested. |
 | `docs/` | ADRs and maintenance runbooks (e.g. `ADR-WAYPIPE-PLATFORM-SEPARATION.md`, `MAINTENANCE-RUNBOOKS.md`). |
 | `tests/` | `bash kleinbem/tests/test-*.sh`, or `just test` from this repo. |
 

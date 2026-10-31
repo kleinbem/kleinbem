@@ -31,6 +31,8 @@
           pkgs.gh
           pkgs.jq
           pkgs.coreutils
+          pkgs.findutils # find (claude-settings-audit.sh)
+          pkgs.gawk # awk (clean's claude filter)
           pkgs.diffutils # cmp (link-root-files.sh)
           pkgs.util-linux # column
         ];
