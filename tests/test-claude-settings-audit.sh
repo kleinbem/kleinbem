@@ -32,4 +32,18 @@ assert_eq \
 
 assert_empty "$(bash "$SCRIPT" "$T/nix/broken")" "a tree without rule files prints nothing"
 
+put nix/a/b/c/d/e/.claude/settings.local.json "$(rules '"Bash(j)"')"
+assert_eq \
+    "stray	1	nix/a/b/c/d/e/.claude/settings.local.json" \
+    "$(bash "$SCRIPT" "$T" | grep 'a/b/c' || true)" \
+    "no depth limit: a deeply nested rule file is still found"
+
+mkdir -p "$T/locked" && chmod 000 "$T/locked"
+rc=0
+bash "$SCRIPT" "$T" >/dev/null 2>&1 || rc=$?
+chmod 755 "$T/locked"
+if [ "$(id -u)" -ne 0 ]; then
+    assert_eq "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "an unreadable directory makes the scan exit non-zero"
+fi
+
 test_summary

@@ -16,7 +16,10 @@ set -euo pipefail
 root="${1:?usage: claude-settings-audit.sh <root>}"
 cd "$root"
 
-find . -maxdepth 6 \
+# No depth limit: a rule file anywhere counts. The prunes keep it fast (~60 ms
+# on the whole workspace). A directory find can't read makes it, and so this
+# script, exit non-zero (pipefail), so callers can tell a partial scan apart.
+find . \
     \( -name .jj -o -name .git -o -name node_modules -o -name target -o -name .direnv -o -name result \) -prune \
     -o -path '*/.claude/settings*.json' -type f -print 2>/dev/null |
     sed 's|^\./||' | LC_ALL=C sort |

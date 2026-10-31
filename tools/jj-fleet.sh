@@ -813,8 +813,9 @@ cmd_clean() {
     done
     printf '%s\n' "${rows[@]}" | column -t -s "$(printf '\t')"
 
-    local claude_rows="" n_claude=0 n_claude_attn=0
-    claude_rows=$(bash "$ROOT/kleinbem/tools/claude-settings-audit.sh" "$ROOT" 2>/dev/null || true)
+    local claude_rows="" n_claude=0 n_claude_attn=0 claude_incomplete=0
+    # A failed scan (unreadable dir, missing script) must not read as clean.
+    claude_rows=$(bash "$ROOT/kleinbem/tools/claude-settings-audit.sh" "$ROOT" 2>/dev/null) || claude_incomplete=1
     if [ -n "$filter" ] && [ -n "$claude_rows" ]; then
         # Keep rows under a targeted repo or its workspaces.
         claude_rows=$(awk -F'\t' -v t="$targets" 'BEGIN { n = split(t, r, /[[:space:]]+/) }
@@ -832,12 +833,14 @@ cmd_clean() {
     local summary="repos: $n_repos · dirty working copies: $n_dirty ($n_dirtyfiles files) · commits not in main: $n_ahead · conflicts: $n_conflicts · jj workspaces: $n_ws"
     [ "$local_only" -eq 0 ] && summary+=" · open PRs: $n_prs · extra branches: $n_branches · open issues: $n_issues (info only)"
     summary+=" · claude rule files: $n_claude ($n_claude_attn to move)"
+    [ "$claude_incomplete" -eq 1 ] && summary+=" · claude scan INCOMPLETE"
     gum style --foreground 245 "$summary"
-    if [ "$n_unclean" -eq 0 ] && [ "$n_claude_attn" -eq 0 ]; then
+    if [ "$n_unclean" -eq 0 ] && [ "$n_claude_attn" -eq 0 ] && [ "$claude_incomplete" -eq 0 ]; then
         gum style --foreground 46 "✅ ALL CLEAN — safe to start new work."
     else
         [ "$n_unclean" -gt 0 ] && gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
         [ "$n_claude_attn" -gt 0 ] && gum style --foreground 214 "⚠ $n_claude_attn Claude settings file(s) hold rules outside the managed policy."
+        [ "$claude_incomplete" -eq 1 ] && gum style --foreground 214 "⚠ The Claude settings scan failed or was partial (unreadable directory?); its list may be incomplete."
         gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → just abandon-merged (proven copies) then push-all · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged · claude rules → nix-config modules/nixos/files/claude-code-policy.json, then delete the file (workspace copies go with ws-gc or a rebase onto main)"
         [ "$strict" -eq 1 ] && return 1
     fi
