@@ -4,6 +4,7 @@ name: Audit Workarounds
 # kleinbem/nix-toolbox's nix-check-workarounds: ones without an upstream link,
 # and linked issues or PRs that are merged or closed, so the workaround can go.
 # The report goes into one issue, and only when it differs from the last one.
+# no-link: describes the audit, not a workaround.
 
 on:
   schedule:
@@ -49,9 +50,17 @@ jobs:
           findings=0
           while read -r slug; do
             # Private repos can't be cloned with this token; they're skipped.
-            [[ "$(gh repo view "$slug" --json isPrivate --jq .isPrivate </dev/null 2>/dev/null)" == false ]] || continue
+            # A failed lookup fails the run rather than skipping a repo.
+            private="$(gh repo view "$slug" --json isPrivate --jq .isPrivate </dev/null)"
+            [[ "$private" == false ]] || continue
             git clone -q --depth 1 "https://github.com/$slug" ".repos/${slug//\//_}" </dev/null
-            out="$(.nix-toolbox/bin/nix-check-workarounds --states ".repos/${slug//\//_}" </dev/null 2>&1 || true)"
+            # Exit 1 means findings; anything higher is an error.
+            rc=0
+            out="$(.nix-toolbox/bin/nix-check-workarounds --states ".repos/${slug//\//_}" </dev/null 2>&1)" || rc=$?
+            if ((rc > 1)); then
+              echo "::error::nix-check-workarounds failed on $slug (exit $rc): $out"
+              exit 1
+            fi
             lines="$(grep -v ' workaround comments, ' <<<"$out" || true)"
             [[ -n "$lines" ]] || continue
             findings=1
@@ -61,18 +70,23 @@ jobs:
               echo
             } >>report.md
           done < <(grep -oE 'github\.com:[^"]+\.git' repos.nix | sed -E 's/^github\.com://; s/\.git$//' | sort -u)
+          if ((findings == 0)); then
+            echo "No findings: every workaround links its report, and none of them is merged or closed." >>report.md
+          fi
           echo "findings=$findings" >>"$GITHUB_ENV"
           cat report.md >>"$GITHUB_STEP_SUMMARY"
 
       - name: Report
-        if: env.findings == '1'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           issue="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --limit 100 --json number,title \
             --jq "map(select(.title == \"$ISSUE_TITLE\"))[0].number // empty")"
+          # A clean report only updates an existing issue (the change to clean).
           if [[ -z "$issue" ]]; then
-            gh issue create --title "$ISSUE_TITLE" --body-file report.md
+            if [[ "$findings" == 1 ]]; then
+              gh issue create --title "$ISSUE_TITLE" --body-file report.md
+            fi
             exit 0
           fi
           last="$(gh issue view "$issue" --json body,comments --jq '(.comments | last | .body) // .body')"
