@@ -1,49 +1,23 @@
 # --- Shared Variables ---
-#
-# Canonical copy — nix/.just/common.just and openwrt/.just/common.just are
-# symlinks to this file.
-#
-# No domain concept: one flat list of every repo in kleinbem/repos.nix,
-# including the three former "conductors" (nix, openwrt, kleinbem) as regular
-# entries. Nothing here is nix-specific or openwrt-specific.
+# Canonical copy: nix/.just/common.just and openwrt/.just/common.just are
+# symlinks to this file. No domain split: one flat list of every repo in repos.nix.
 
-# Absolute path to the workspace root. Two valid callers: a conductor one
-# level below the root (nix/, openwrt/, kleinbem/ -> the parent), and the
-# root justfile itself (a symlink to kleinbem/root/justfile; just uses the
-# symlink's directory, and inside a `mod` justfile_directory() is the
-# importing root justfile's directory). The root is recognised by
-# kleinbem/repos.nix sitting right below it and by not being a repo itself:
-# nix/ has a kleinbem -> ../kleinbem symlink, so repos.nix alone matches there
-# too. See kleinbem/tools/jj-fleet.sh's find_root() for the walk-up version
-# used outside just (works from any depth).
+# Workspace root. Callers are a conductor one level below it, or the root
+# justfile (a symlink; just uses the symlink's directory). The root has
+# kleinbem/repos.nix below it and no .jj; the .jj check matters because nix/
+# has a kleinbem -> ../kleinbem symlink. jj-fleet.sh's find_root() walks up instead.
 ROOT := if path_exists(justfile_directory() / "kleinbem" / "repos.nix") == "true" { if path_exists(justfile_directory() / ".jj") == "false" { justfile_directory() } else { parent_directory(justfile_directory()) } } else { parent_directory(justfile_directory()) }
 
-# Every repo in the fleet-wide manifest (kleinbem/repos.nix) — flat, no
-# categorization. Used as-is: no per-conductor default scope anymore, every
-# fan-out recipe's default (no filter) is "every repo".
+# Every repo in kleinbem/repos.nix; the default scope of every fan-out recipe.
 ALL_REPOS := shell("nix eval --raw --file " + ROOT + "/kleinbem/repos.nix --apply 'rs: builtins.concatStringsSep \" \" (builtins.attrNames rs)' 2>/dev/null || echo ''")
 
-# Kept as a plain alias so maintenance.just/ai.just (not part of this round's
-# redesign, still reference {{REPOS}} for their own format-all/lint-all/
-# knowledge-sync loops) get the same "whole fleet" behavior consistently,
-# rather than half the tooling being domain-less and half not. Those loops
-# are already guarded (skip if no flake.nix / no tracked *.sh files), so this
-# is a low-risk, honest side-effect rather than a silent behavior change.
+# Alias still used by nix/ and openwrt/ maintenance.just and ai.just.
 REPOS := ALL_REPOS
 
-# Flake-input overrides — every repo gets one, including non-flakes (nix,
-# openwrt, kleinbem, github-config, kleinbem-secrets); nix silently ignores
-# --override-input for names that aren't actual flake inputs, so this is
-# harmless rather than worth filtering. Use | as the sed delimiter to avoid
-# conflict with the forward slashes in the ROOT path.
-#
-# nix-secrets EXCLUDED from the generic loop and remapped explicitly: as of
-# the 2026-08-07 cutover, nix-config's flake input keeps the "nix-secrets"
-# NAME (see nix-config/flake.nix's note) but the repo behind it is now
-# kleinbem-secrets. A plain self-mapped override (--override-input
-# nix-secrets git+file://.../nix-secrets) would point that input at the now-
-# legacy local nix-secrets checkout — silently undoing the cutover for every
-# local build/provisioning recipe that uses {{OVERRIDES}}.
+# --override-input for every repo. A name that isn't an input of the flake only
+# warns ("does not match any input"). | is the sed delimiter because ROOT has slashes.
+# The extra nix-secrets -> kleinbem-secrets mapping is for the old input name;
+# no flake uses it any more (nix-config's input is kleinbem-secrets).
 OVERRIDES := shell("echo '" + ALL_REPOS + "' | tr ' ' '\\n' | grep -vx nix-secrets | tr '\\n' ' ' | sed -E 's|([^ ]+)|--override-input \\1 git+file://" + ROOT + "/\\1|g'") + " --override-input nix-secrets git+file://" + ROOT + "/kleinbem-secrets"
 
 KEEP := "3"

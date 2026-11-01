@@ -1,12 +1,7 @@
 name: Audit Transitive Dependencies
 
-# Monitor for major version changes in C library dependencies (FFmpeg, OpenSSL, etc.)
-# that could break dependent packages (like the FFmpeg 9.0 → waypipe issue).
-#
-# Runs:
-# - On flake.lock changes (catches updates before merge)
-# - Weekly (detects indirect updates)
-# - Manual trigger (on-demand audit)
+# Flags major version changes in C library deps (FFmpeg, OpenSSL, ...) that can
+# break dependents, like FFmpeg 9.0 broke waypipe.
 
 on:
   pull_request:

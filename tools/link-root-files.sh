@@ -1,15 +1,9 @@
 #!/usr/bin/env bash
 # link-root-files.sh <root>
 #
-# The workspace root isn't a repo, so its own files live in kleinbem/root/
-# and the root holds relative symlinks to them:
-#   <root>/CLAUDE.md -> kleinbem/root/CLAUDE.md
-#   <root>/justfile  -> kleinbem/root/justfile
-#   <root>/.envrc    -> kleinbem/root/.envrc
-#
-# Creates any missing link. A regular file with the same content is swapped
-# for the link; one that differs is left alone with a note, so local edits
-# are never lost. Called by `just bootstrap` (jj-fleet.sh cmd_bootstrap).
+# The root isn't a repo, so it holds relative symlinks to kleinbem/root/
+# CLAUDE.md, justfile and .envrc. Creates missing links; a same-content file is
+# replaced by the link, a differing one is left alone with a note. Run by `just bootstrap`.
 set -euo pipefail
 
 root="${1:?usage: link-root-files.sh <workspace-root>}"

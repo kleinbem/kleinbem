@@ -4,38 +4,14 @@ set working-directory := "."
 export JJ_PAGER := "cat"
 
 # --- Workspace VCS operations (jj-first) ---
-#
-# Canonical copy — nix/.just/jj.just and openwrt/.just/jj.just are symlinks
-# to this file. Every recipe operates on {{REPOS}} (this conductor's default
-# scope: itself + its domain's sub-repos + anything tagged "shared") unless
-# a `filter` argument is given, in which case it substring-matches against
-# the WHOLE fleet ({{ALL_REPOS}}) — so `just jj::status-all nix-secrets`
-# works from openwrt/ too. See kleinbem/tools/resolve-targets.sh.
-#
-# Each repo listed in `kleinbem/repos.nix` is its own independent git+jj repo
-# (NOT a git submodule — see `just jj::bootstrap`). The three conductors
-# (nix/, openwrt/, kleinbem/) are colocated jj repos too, and are addressable
-# by name like any other repo.
-#
-# Use `git` only for legacy rescue ops or destructive resets — none of
-# those are wrapped here; type them directly when needed.
-#
-# TUI output uses `gum` (charmbracelet/gum) — install via `nix-env` or
-# add to home-manager packages. Recipes degrade noticeably if absent
-# (they call gum and the user sees "gum: command not found").
-#
-# --- Signing ---
-#
-# Today's reality: commits are signed via `git commit --amend -S` during
-# `sign-unsigned`, which touches the YubiKey on every signing operation.
-# TODO: wire a NoTouch SSH-FIDO key + `sign-all = true` in ~/.config/jj/
-# config.toml so jj signs at describe-time without prompting. Until then,
-# expect one YubiKey touch per repo per signing pass.
+# Canonical copy: nix/.just/jj.just and openwrt/.just/jj.just are symlinks to
+# this file. With no filter a recipe covers every repo in repos.nix; a filter
+# substring-matches repo names (tools/resolve-targets.sh). Recipes need `gum`.
+# jj signs commits itself; sign-unsigned re-signs whatever is left unsigned.
 
 # --- Interactive hub ---
 
-# Interactive launcher — fuzzy-pick a workspace operation. Great for
-# muscle memory: just type `j` (or whatever alias) → pick.
+# Interactive launcher: fuzzy-pick a workspace operation.
 [group("Status")]
 hub:
     #!/usr/bin/env bash
@@ -83,30 +59,19 @@ hub:
 
 # --- Status / read-only ---
 
-# Compact workspace overview — change_id, @ state (described or not),
-# and a count of described vs undescribed commits ahead of origin/main.
-#   just jj::status-all              # this conductor's default scope
-#   just jj::status-all nix          # everything matching "nix" fleet-wide
-#   just jj::status-all nix-secrets  # just that one repo, from anywhere
+# Per repo: change id, @ state and commits ahead of origin/main.
 [group("Status")]
 status-all filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh status-all {{filter}}
 
-# "Is the fleet clean enough to start new work?" — one row per repo:
-# working-copy data (files changed in @), commits ahead of origin,
-# conflicts, open jj agent workspaces, open PRs, open issues (info only),
-# and GitHub branches other than main/production; ✅ per repo + a verdict.
-# GitHub side is one batched GraphQL call (~1-2s). Flags:
-#   --local    skip GitHub, local checks only
-#   --strict   exit 1 when anything is unclean (for scripts/CI)
-#   just jj::clean                 # whole fleet
-#   just jj::clean nix --local     # nix* repos, no network
+# Flags: --local skips GitHub, --strict exits 1 when anything is unclean.
+
+# Is the fleet clean enough to start new work? One row per repo plus a verdict.
 [group("Status")]
 clean *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh clean {{args}}
 
-# GitHub remote dashboard — origin/main SHA, latest CI status,
-# open PR count, open issue count per repo. ~6s due to gh API roundtrips.
+# GitHub dashboard per repo: origin/main SHA, CI status, open PRs and issues (~6s).
 [group("Status")]
 remote-status filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-status {{filter}}
@@ -121,91 +86,61 @@ remote-prs filter="":
 remote-ci limit="5" filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh remote-ci {{limit}} {{filter}}
 
-# Show the working-copy diff for every dirty repo in scope.
-# Variadic — pass any `jj diff` flag through:
-#   just jj::diff-all             # default jj diff, this conductor's scope
-#   just jj::diff-all -- --git    # git-style
-#   just jj::diff-all nix --stat  # filtered to "nix", stat summary
+# Working-copy diff of every dirty repo; extra args go to `jj diff`.
 [group("Status")]
 diff-all filter="" *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh diff-all {{filter}} {{args}}
 
+# Only unsigned commits fail (GitHub rejects them); unverified ones are only flagged.
+
 # Audit commits ahead of origin for missing signatures.
-# Status codes (git's %G?):
-#   G  good signature, verified locally
-#   U  signed but signing key not in ~/.ssh/allowed_signers
-#   B  bad signature (forgery/corruption)
-#   N  NO signature — the real problem; GitHub will reject
-#   E, X, Y, R  various error states
 [group("Status")]
 check-signatures filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh check-signatures {{filter}}
 
-# Drop the local copies of changes that already landed on main — the
-# orphans every squash-merged PR leaves behind. Only provable cases go
-# (files identical on trunk, identical patch, or exact merged-PR head);
-# conflicts, live workspace @s and anything unproven stay. jj-pull runs the
-# same step after every fetch, so this is for catching up without pulling.
-#   just jj::abandon-merged --dry-run      # show, don't touch
-#   just jj::abandon-merged nix-           # only nix-* repos
+# Only proven cases go; conflicts, workspace @s and anything unproven stay.
+# pull-all does this too.
+
+# Drop local copies of changes already on main (--dry-run to just show them).
 [group("Sync")]
 abandon-merged *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh abandon-merged {{args}}
 
-# Fetch+prune every repo in scope and report local branches other than
-# main: merged (safe to forget) vs. unclear (needs a manual look) vs.
-# `gh pr checkout` residue. Read-only — never deletes anything itself,
-# prints the cleanup one-liner for whatever it flags.
+# Read-only: prints the cleanup commands instead of running them.
+
+# Report local branches other than main: merged, unclear or `gh pr checkout` residue.
 [group("Status")]
 sweep-merged filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sweep-merged {{filter}}
 
-# Sign every unsigned commit ahead of origin, in scope.
-# Uses `git rebase --exec` rather than `jj sign` (more reliable).
-# Auto-advances the local `main` bookmark to @ first if @ has a description
-# and is ahead — so users can run `sign-unsigned` directly after `jj describe`
-# without needing a redundant `push-all` to trigger the bookmark move.
-# First operation per session may need a YubiKey PIN; cached thereafter.
+# Uses `git rebase --exec` (jj sign doesn't reliably drive a hardware key).
+# Advances main first, so it works right after `jj describe`.
+
+# Sign every unsigned commit ahead of origin.
 [group("Sync")]
 sign-unsigned filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sign-unsigned {{filter}}
 
 # --- Sync ---
 
-# Fetch from origin in every repo in scope, rebase the working-copy change,
-# and drop local copies of changes that landed on main (jj-abandon-merged).
+# Fetch + rebase every repo, then drop local copies of merged changes.
 [group("Sync")]
 pull-all filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh pull-all {{filter}}
 
-# Describe (commit) dirty changes across the scope.
-# Prompts for message via gum input if not given.
-#   just jj::save-all "feat: stalwart container"
-#   just jj::save-all                       # prompts
-#   just jj::save-all "fix: qos" openwrt     # filtered to "openwrt"
+# Describe dirty changes across the scope; prompts for the message if not given.
 [group("Sync")]
 save-all message="" filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save-all "{{message}}" {{filter}}
 
-# Describe (commit) ONE repo only — the fan-out-free path for when other
-# repos carry someone else's in-flight work (parallel agent session, open
-# editor). Works with any repo name in the fleet, including "nix"/"openwrt"/
-# "kleinbem" themselves.
-#   just jj::save nix-packages "fix(langfuse): bump fetcher"
+# Describe one repo only, for when other repos hold someone else's in-flight work.
 [group("Sync")]
 save repo message:
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save {{repo}} "{{message}}"
 
-# One-shot: describe every dirty repo in scope with the given message, sign
-# anything unsigned ahead of origin, and push. The "commit and ship"
-# muscle-memory command — covers the entire describe → sign → push flow in
-# one keystroke. `ship` is kept as an alias for muscle memory.
-#
-# With V2 NoTouch signing active this whole pipeline is silent and ~5s.
-# If a sub-repo's signed-commit branch rule rejects, push-all surfaces it.
-#
-# Prompts for the message via `gum input` if not given. Same persona env
-# var (KLEINBEM_PERSONA) works as with save-all.
+# Prompts for the message if not given; KLEINBEM_PERSONA works as with save-all.
+
+# Describe every dirty repo, sign anything unsigned, push.
 [group("Sync")]
 ship-all message="" filter="":
     #!/usr/bin/env bash
@@ -220,10 +155,7 @@ ship-all message="" filter="":
     fi
     gum style --border normal --padding "0 2" --border-foreground 99 --foreground 99 "🚢 Shipping: $msg"
     just jj::save-all "$msg" "{{filter}}"
-    # Flake-lockfile sync only makes sense where a maintenance::update-local
-    # recipe actually exists (nix/ has one; openwrt/kleinbem don't, no flakes
-    # to sync). Check for the recipe directly rather than hardcoding a repo
-    # name — works the same way for any future repo, flake or not.
+    # Only where a maintenance::update-local recipe exists (nix/ has one).
     if just --show maintenance::update-local >/dev/null 2>&1; then
         just maintenance::update-local
         just jj::save-all "chore: update flake lockfiles" "{{filter}}"
@@ -234,9 +166,7 @@ ship-all message="" filter="":
 
 alias ship := ship-all
 
-# Push every repo in scope. Auto-advances main bookmark to @ if @ has a
-# description and is ahead of local main. Covers the common
-# describe-then-push flow.
+# Push every repo in scope, advancing main to a described @ first.
 [group("Sync")]
 push-all filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh push-all {{filter}}
@@ -248,9 +178,7 @@ push-all filter="":
 sync filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sync {{filter}}
 
-# Clone every sub-repo listed in kleinbem/repos.nix (in scope) and initialize
-# jj on it. Never clones the three conductors themselves — you're already
-# inside one to run this.
+# Clone missing repos from repos.nix, set up jj, link the workspace-root files.
 [group("Development")]
 bootstrap filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh bootstrap {{filter}}
@@ -265,20 +193,13 @@ branch-all name filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh branch-all {{name}} {{filter}}
 
 # --- Agent workspaces ---
-#
-# Give a concurrent Claude tab/subagent its own jj working copy instead of
-# sharing @ with the primary checkout — the fix for "another session's
-# `jj new`/`abandon`/`undo` silently discarded my edits". Lives at
-# <repo>.ws/<name>/, a sibling of the repo dir, outside repos.nix's flat
-# namespace so no *-all recipe ever touches it. No .git there — jj-only;
-# push/pull still work from any workspace via the shared git backend.
+# Each concurrent session gets its own jj working copy at <repo>.ws/<name>/, so
+# one session's `jj new`/`abandon`/`undo` can't discard another's edits. Outside
+# repos.nix, so *-all recipes skip them. jj-only (no .git); push works from there.
 
-# Create a fresh workspace for one repo and print the path to cd into.
-# Every agent session that edits a repo works in one of these; the primary
-# checkout is Martin's.
-#   just jj::ws-new nix-config           # auto-named ws-<time>-<rand>
-#   just jj::ws-new nix-config agentB    # explicit name
-#   just jj::ws-new nix-config agentB -r <change-id>   # start on an existing change
+# e.g. `just jj::ws-new nix-config agentB -r <change-id>`; name defaults to ws-<time>-<rand>.
+
+# Create a workspace for one repo and print the path to cd into.
 [group("Agent workspaces")]
 ws-new repo name="" *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-new {{repo}} {{name}} {{args}}
@@ -288,12 +209,9 @@ ws-new repo name="" *args="":
 ws-list filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-list {{filter}}
 
-# Forget + delete agent workspaces that are empty, undescribed, and older
-# than --hours (default 4h) — or already missing their directory. Never
-# touches one with real content, no matter its age.
-#   just jj::ws-gc                  # whole fleet, default age
-#   just jj::ws-gc nix-config       # one repo
-#   just jj::ws-gc "" --hours 1     # whole fleet, tighter age
+# Never touches real content; also reaps workspaces whose directory is gone.
+
+# Forget + delete workspaces with no work of their own older than --hours (default 4).
 [group("Agent workspaces")]
 ws-gc filter="" *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-gc {{filter}} {{args}}

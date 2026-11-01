@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Lists Claude Code settings files under the workspace root that hold
-# permission rules (permissions.allow/ask/deny). The fleet's rules live in
-# the NixOS managed settings (nix-config modules/nixos/files/
-# claude-code-policy.json); every "don't ask again" adds one more exact
-# command to a .claude/settings.local.json wherever the session ran, and
-# those pile up unseen (2026-10-31: 24 files, one with 117 rules).
+# permission rules. Fleet rules belong in the managed policy (nix-config
+# modules/nixos/files/claude-code-policy.json); every "don't ask again" adds a
+# rule to a local settings file, and those pile up unseen.
 #
 # Usage: claude-settings-audit.sh <root>
 # Output, one TSV line per file with rules: <kind>\t<rules>\t<path relative to root>

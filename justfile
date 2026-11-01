@@ -1,8 +1,5 @@
-# Fleet-Wide Hub — kleinbem/ is the workspace root/profile repo. Every
-# fan-out recipe defaults to the whole fleet (no domain concept — see
-# kleinbem/.just/common.just); same behavior from nix/, openwrt/, or the
-# bare workspace root (~/Develop/github.com/kleinbem/justfile, a symlink to
-# root/justfile here).
+# Fleet hub. Fan-out recipes default to the whole fleet, the same from nix/,
+# openwrt/ or the workspace root (whose justfile is a symlink to root/justfile).
 import '.just/common.just'
 
 # --- Modules ---
@@ -62,9 +59,7 @@ bootstrap filter="":
 in repo *args:
     @cd {{ROOT}}/{{repo}} && just {{args}}
 
-# Unit tests for the shared tooling (tools/resolve-targets.sh) — the logic
-# nix/ and openwrt/ both depend on via symlink. Fast, no side effects on any
-# real repo. Run after touching anything in .just/ or tools/.
+# Unit tests for the shared tooling in tools/; fast, touches no real repo.
 [group("Main")]
 test:
     #!/usr/bin/env bash
