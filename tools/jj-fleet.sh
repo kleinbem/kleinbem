@@ -614,9 +614,10 @@ cmd_abandon_merged() {
 # --- clean ---
 # One table answering "is the fleet clean enough to start new work?". GitHub
 # data (PRs, issues, extra branches) comes from ONE GraphQL request; nothing
-# here fetches or mutates a repo. Below it, Claude settings files with
-# permission rules (claude-settings-audit.sh); only settings.local.json is
-# info-only. Open issues never count against the verdict.
+# here fetches, though jj log/diff may snapshot a dirty working copy. Below
+# it, Claude settings files with permission rules (claude-settings-audit.sh);
+# only settings.local.json is info-only. Open issues never count against the
+# verdict.
 CLEAN_ALLOWED_BRANCHES="main production" # long-lived branches that never count as clutter
 
 cmd_clean() {

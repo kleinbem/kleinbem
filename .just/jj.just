@@ -114,6 +114,7 @@ sweep-merged filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sweep-merged {{filter}}
 
 # Uses `git rebase --exec` (jj sign doesn't reliably drive a hardware key).
+# no-link: not reported upstream yet.
 # Advances main first, so it works right after `jj describe`.
 
 # Sign every unsigned commit ahead of origin.
@@ -194,8 +195,9 @@ branch-all name filter="":
 
 # --- Agent workspaces ---
 # Each concurrent session gets its own jj working copy at <repo>.ws/<name>/, so
-# one session's `jj new`/`abandon`/`undo` can't discard another's edits. Outside
-# repos.nix, so *-all recipes skip them. jj-only (no .git); push works from there.
+# one session's `jj new`/`abandon` can't discard another's edits (`jj undo` still
+# can: the op log is shared). Outside repos.nix, so *-all recipes skip them.
+# jj-only (no .git); push works from there.
 
 # e.g. `just jj::ws-new nix-config agentB -r <change-id>`; name defaults to ws-<time>-<rand>.
 
