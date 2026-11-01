@@ -17,10 +17,10 @@
   kleinbem = "git@github.com:kleinbem/kleinbem.git";
   nix-config = "git@github.com:kleinbem/nix-config.git";
   nix-detour = "git@github.com:kleinbem-dev/nix-detour.git";
+  nix-detour-fleet = "git@github.com:kleinbem/nix-detour-fleet.git";
   nix-devshells = "git@github.com:kleinbem/nix-devshells.git";
   nix-gantry = "git@github.com:kleinbem-dev/nix-gantry.git";
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
-  nix-holds-fleet = "git@github.com:kleinbem/nix-holds-fleet.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
   nix-presets = "git@github.com:kleinbem/nix-presets.git";
   nix-templates = "git@github.com:kleinbem/nix-templates.git";
