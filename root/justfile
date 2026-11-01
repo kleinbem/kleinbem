@@ -1,14 +1,6 @@
-# Workspace-root justfile. ~/Develop/github.com/kleinbem/ itself is NOT a
-# repo (no .git/.jj), just the directory holding every real repo as flat
-# siblings. The root's `justfile` is a symlink to kleinbem/root/justfile
-# (`just bootstrap` creates it), so the fleet dashboard and the jj:: module
-# work from here without `cd kleinbem` first.
-#
-# Imports the same shared modules as kleinbem/, nix/ and openwrt/.
-# common.just detects that it's running from the root (kleinbem/repos.nix
-# sits right below) and sets ROOT to this directory instead of its parent.
-# No domain concept anywhere: every repo is a peer, status-all (and friends)
-# default to the whole fleet from any location.
+# Workspace-root justfile. The root is not a repo; this file is reached through
+# a symlink (created by `just bootstrap`), so the fleet recipes work here without
+# `cd kleinbem`. common.just sees kleinbem/repos.nix below and sets ROOT to here.
 import 'kleinbem/.just/common.just'
 
 # --- Modules ---

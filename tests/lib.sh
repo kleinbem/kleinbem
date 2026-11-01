@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Shared assertion helpers for kleinbem/tests/*.sh. Source this, run your
-# assert_* calls, then call test_summary at the end — it prints the tally
-# and exits non-zero if anything failed (so `just test` fails loudly).
-#
-# Not a framework — this workspace doesn't otherwise depend on one (bats
-# etc. aren't in nix-devshells), and the test surface here is small enough
-# that a hand-rolled ~30-line helper is less overhead than adding one.
+# Assertion helpers for kleinbem/tests/*.sh: source it, call assert_*, end
+# with test_summary (prints the tally, exits non-zero on any failure).
+# Hand-rolled because bats isn't in nix-devshells.
 
 _PASS=0
 _FAIL=0

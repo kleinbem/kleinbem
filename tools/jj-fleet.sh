@@ -1,23 +1,10 @@
 #!/usr/bin/env bash
-# jj-fleet — Nix-packaged subset of the jj dashboard (kleinbem/flake.nix,
-# writeShellApplication: pinned runtimeInputs + shellcheck-gated build).
+# jj-fleet: the fleet dashboard behind the jj:: just recipes, packaged in
+# kleinbem/flake.nix. Per-repo jj work is delegated to jj-toolbox/bin/*; this
+# script fans it out over repos.nix and builds the tables.
 #
-# Covers the read-only/safe recipes only: status-all, clean, abandon-merged, diff-all,
-# remote-status, remote-prs, remote-ci, check-signatures, bootstrap,
-# init-bookmarks, sweep-merged. Everything with real mutation logic
-# (save-all, push-all, ship-all, sign-unsigned, ...) is still in
-# kleinbem/.just/jj.just, converted later once this phase proves out.
-#
-# No domain concept — one flat list of every repo in kleinbem/repos.nix, no
-# nix/openwrt-specific handling anywhere. status-all with no filter shows
-# everything, always, from anywhere in the workspace.
-#
-# Runnable from ANY directory under the workspace root, not just the three
-# conductors — ROOT is found by walking up from $PWD looking for
-# kleinbem/repos.nix (same trick git/jj use to find their own repo root).
-# `just` recipes that already have {{ROOT}} pass it as an env var to skip the
-# walk; direct invocation (typing `jj-fleet status-all` from inside any repo,
-# once it's on PATH via the devshell) relies on the walk.
+# ROOT comes from the env (just passes it) or by walking up from $PWD to the
+# directory holding kleinbem/repos.nix, so it runs from anywhere in the workspace.
 #
 # Usage: jj-fleet <subcommand> [args...]
 set -euo pipefail
@@ -47,9 +34,8 @@ ALL_REPO_URLS="$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
     --apply 'rs: builtins.concatStringsSep "\n" (map (n: "${n} ${rs.${n}}") (builtins.attrNames rs))' 2>/dev/null || true)"
 export ALL_REPO_URLS
 
-# GitHub "owner/name" of a repo, from its URL in repos.nix: repos live under
-# the kleinbem user or the kleinbem-dev org (nix-gantry since 2026-10-29), so
-# the owner is never assumed. Exported for the `bash -c` children below.
+# GitHub "owner/name" from the repo's URL in repos.nix; repos live under both
+# kleinbem and kleinbem-dev. Exported for the `bash -c` children below.
 gh_repo_of() {
     local name u url=""
     while read -r name u; do
@@ -72,10 +58,7 @@ cmd_status_all() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📊 Workspace Status (jj)"
-    # Per-repo @ state + ahead-of-trunk breakdown lives in
-    # jj-toolbox/bin/jj-ahead — not duplicated here anymore. This loop fans
-    # it out and re-decorates rows with a REPO column and this table's
-    # emoji status style.
+    # Per-repo state comes from jj-toolbox's jj-ahead; this adds the REPO column.
     {
         printf "REPO\tCHANGE\t@ STATE\tAHEAD OF ORIGIN\n"
         for repo in $targets; do
@@ -201,9 +184,7 @@ cmd_check_signatures() {
     local filter="${1:-}" targets any_unsigned=0 any_unverified=0
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signature audit (commits ahead of origin/main)"
-    # Per-repo audit logic lives in jj-toolbox's jj-check-signatures (not
-    # duplicated here anymore) — this loop just fans it out and folds its
-    # output into one summary table. See jj-toolbox/bin/jj-check-signatures.
+    # Per-repo audit is jj-toolbox's jj-check-signatures; this folds it into one table.
     local rows=("REPO	COMMITS	STATUS	DETAIL")
     for repo in $targets; do
         local name="$repo" dir="$ROOT/$repo" out status ahead detail
@@ -277,11 +258,8 @@ cmd_pull_all() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📥 Fetching + rebasing all repositories"
-    # Per-repo fetch+rebase (with the credential-helper override that
-    # dodges the oauth-device-flow hang) lives in jj-toolbox/bin/jj-pull —
-    # not duplicated here anymore.
-    # jj-pull also runs jj-abandon-merged after the rebase; its one-line
-    # summary is the only output worth surfacing per repo.
+    # jj-toolbox's jj-pull does fetch+rebase+abandon-merged; only its
+    # "Abandoned N commits" line is worth showing.
     for repo in $targets; do
         local name="$repo" rpath="$ROOT/$repo" out summary
         out=$(gum spin --spinner dot --title "$name..." --show-output -- \
@@ -307,16 +285,9 @@ cmd_save_all() {
     targets=$(resolve_targets "$filter")
     local author=""
     if [ -n "${KLEINBEM_PERSONA:-}" ]; then
-        # full-name/email — only available via lib/personas.nix's joined
-        # view (personas.nix alone never has them, by design).
-        # kleinbem-secrets/personas/contact.nix is plain Nix (2026-08-09 —
-        # full-name/email become public the moment a persona commits
-        # anything, so sops-encrypting them at rest never bought real
-        # confidentiality; import it directly, no decrypt step, no tmpfs
-        # dance). This also drops the V2 NoTouch pipeline's former
-        # dependency on nixos-nvme's TPM identity being a working sops
-        # decrypt recipient for this specific file — one less thing that
-        # could fail unattended.
+        # full-name/email only exist in lib/personas.nix's joined view.
+        # personas/contact.nix is plain Nix (the data goes public with the
+        # first commit anyway), so no sops decrypt is needed here.
         author=$(nix eval --raw --impure --expr "
             let
               lib = (import <nixpkgs> {}).lib;
@@ -354,8 +325,6 @@ cmd_save_all() {
         # Show exactly what's being committed — a fan-out save can otherwise
         # silently scoop another session's in-flight work.
         (cd "$rpath" && jj diff --summary 2>/dev/null | sed 's/^/     /')
-        # Per-repo describe+advance+new lives in jj-toolbox/bin/jj-save —
-        # not duplicated here anymore.
         local save_args=("$rmsg")
         [ -n "$author" ] && save_args=(--author "$author" "$rmsg")
         (cd "$rpath" && "$ROOT/jj-toolbox/bin/jj-save" "${save_args[@]}") >/dev/null 2>&1
@@ -388,9 +357,7 @@ cmd_sign_unsigned() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signing unsigned commits ahead of origin"
-    # Per-repo signing logic (auto-advance, detached-HEAD handling, marker-
-    # tagged stash dance, git rebase --exec re-sign) lives in
-    # jj-toolbox/bin/jj-sign-unsigned — not duplicated here anymore.
+    # Per-repo signing is jj-toolbox's jj-sign-unsigned.
     local any_done=0
     for repo in $targets; do
         local name="$repo" rpath="$ROOT/$repo" out status
@@ -436,10 +403,8 @@ cmd_push_all() {
         # truly nothing to advance AND remote already matches.
         pending=$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)
         [ "$before" = "$target" ] && [ -z "$pending" ] && { gum style --foreground 244 "  ✓ $name up to date (${target:0:12})"; exit 0; }
-        # Per-repo push mechanics (bookmark-advance, push, credential-helper
-        # override, fetch+rebase+retry once on divergence) live in
-        # jj-toolbox/bin/jj-push — not duplicated here anymore. This loop
-        # just fans it out and verifies the result against origin.
+        # jj-toolbox's jj-push does the push (and one fetch+rebase retry);
+        # this loop verifies the result against origin.
         out=$("$ROOT/jj-toolbox/bin/jj-push" 2>&1 || true)
         target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
         after=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
@@ -471,30 +436,13 @@ cmd_sync() {
 }
 
 # --- sweep-merged ---
-# Read-only diagnostic — fetches+prunes every repo in scope, then reports
-# every local branch other than main and whether its content already made
-# it into origin/main. Three detection methods, weakest-signal last:
-#   1. ancestor-of-origin/main   — plain/fast-forward merges
-#   2. commit-subject match      — squash-merges (GitHub's default squash
-#      message is "<original subject> (#N)", so the branch tip's own
-#      subject line shows up verbatim inside a main commit's subject)
-#   3. gh PR search by head ref  — catches anything method 2 misses (e.g.
-#      an amended commit message), at the cost of one gh API call/branch
-# Also flags `gh pr checkout <N>` residue (refs/remotes/pr/* — gh's local
-# tracking convention, not a real GitHub branch) since that's always dead
-# weight regardless of merge status.
-# Never deletes anything itself — a heuristic false-positive across a whole
-# fleet run unattended is worse than one extra manual step. Prints the
-# `jj bookmark forget` command for whatever it flags; run that by hand (or
-# ask an agent) once you've eyeballed the table.
+# Read-only: reports local branches other than main and whether they are on
+# origin/main (detection lives in jj-toolbox's jj-sweep-merged). Never deletes:
+# a heuristic false positive across the fleet is worse than one manual step.
 cmd_sweep_merged() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Branch sweep — local branches vs. origin/main"
-    # Per-repo detection (ancestor/squash-subject/gh-PR-search, plus gh-pr-
-    # checkout residue) lives in jj-toolbox/bin/jj-sweep-merged — not
-    # duplicated here anymore. This loop fans it out and re-decorates rows
-    # with a REPO column and this table's emoji status style.
     local rows=("REPO	BRANCH	STATUS	DETAIL") any=0
     for repo in $targets; do
         local dir="$ROOT/$repo" name="$repo" out
@@ -525,12 +473,7 @@ cmd_sweep_merged() {
 
 # --- branch-all ---
 cmd_branch_all() {
-    # Named bookmark_name, not "name" — the per-repo loop below already uses
-    # $name as its own local (matching the pattern of every other subcommand
-    # here), and unlike the old just recipe (where {{name}} was a literal
-    # text-substitution done before bash ever ran, so it couldn't collide
-    # with a same-named bash variable), these are now real bash locals that
-    # would otherwise shadow each other.
+    # Not "name": the loop below uses $name as its own local.
     local bookmark_name="${1:?bookmark name required}" filter="${2:-}"
     gum confirm "🌿 Create bookmark '$bookmark_name' across the workspace?" || exit 0
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌿 Creating bookmark '$bookmark_name'"
@@ -545,19 +488,8 @@ cmd_branch_all() {
 }
 
 # --- workspace-new / workspace-list / workspace-gc ---
-#
-# jj workspaces give each concurrent agent/session its own working-copy
-# commit and its own files on disk, sharing only the commit graph and op
-# log with the repo's primary checkout. That fixes the failure mode where
-# one Claude tab's `jj new`/`abandon`/`undo`/`restore` silently discards or
-# moves another tab's in-progress edits, because they were all sharing one
-# @ in the primary checkout.
-#
-# Added workspaces live at <repo>.ws/<name>/, a sibling of the repo dir —
-# outside repos.nix's flat namespace, so no *-all fan-out recipe ever
-# touches them. They are jj-only (no .git): raw git doesn't work there,
-# only jj. `jj git push`/pull-all/push-all still work from any workspace
-# since the git backend is shared with the primary checkout.
+# Each session gets its own working copy at <repo>.ws/<name>/ (jj-only, no
+# .git), outside repos.nix so no *-all recipe touches it.
 cmd_workspace_new() {
     local repo="${1:?repo required}" name="${2:-}"
     shift; [ $# -gt 0 ] && shift
@@ -568,8 +500,6 @@ cmd_workspace_new() {
     # one) so this can print the exact path without parsing its output.
     [ -z "$name" ] && name="ws-$(date +%H%M%S)-$RANDOM"
     local ws_path="${dir}.ws/$name"
-    # Workspace creation (mkdir, jj workspace add -r trunk() or -r <rev>, .envrc copy)
-    # lives in jj-toolbox/bin/jj-ws-new — not duplicated here anymore.
     if (cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ws-new" "$name" "$@") >/dev/null 2>&1; then
         gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
         gum style --foreground 212 "   cd $ws_path"
@@ -583,9 +513,6 @@ cmd_workspace_list() {
     local filter="${1:-}" targets any=0
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🗂  Agent workspaces"
-    # Per-workspace state detection (empty/dirty-undescribed/described, via
-    # a fresh cd-in snapshot) lives in jj-toolbox/bin/jj-ws-list — not
-    # duplicated here anymore.
     local rows=("REPO	WORKSPACE	@ STATE	DIR")
     for repo in $targets; do
         local dir="$ROOT/$repo" out
@@ -616,9 +543,7 @@ cmd_workspace_gc() {
     local targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, no unmerged work or unsaved edits)"
-    # Per-workspace reap decision (no unmerged work, no unsaved edits,
-    # aged out, or orphaned dir) lives in jj-toolbox/bin/jj-ws-gc — not
-    # duplicated here anymore. This loop fans it out and sums the totals.
+    # The reap decision is jj-toolbox's jj-ws-gc; this sums the totals.
     local reaped=0 kept=0
     for repo in $targets; do
         local dir="$ROOT/$repo" out
@@ -644,10 +569,8 @@ cmd_workspace_gc() {
 }
 
 # --- abandon-merged ---
-# Drop the local copies of changes that already landed on main, fleet-wide.
-# Per-repo proof (files identical on trunk / identical patch / exact merged
-# PR head) lives in jj-toolbox/bin/jj-abandon-merged — this loop fans it
-# out, re-decorates rows with a REPO column, and sums the totals.
+# Fleet-wide fan-out of jj-toolbox's jj-abandon-merged (which holds the proof
+# logic), with a REPO column and totals.
 cmd_abandon_merged() {
     local filter="" dry=0
     while [ $# -gt 0 ]; do
@@ -689,23 +612,12 @@ cmd_abandon_merged() {
 }
 
 # --- clean ---
-# One table answering "is the fleet clean enough to start new work?". Per
-# repo: working-copy data (files changed in @, described or not), non-empty
-# commits not in trunk (any workspace or orphaned head), conflicted commits, open jj agent workspaces, and — unless
-# --local — GitHub open PRs, open issues, and branches other than the
-# long-lived ones below, all fetched in ONE GraphQL request (aliases r0..rN)
-# instead of one `gh` roundtrip per repo per field. Nothing here fetches or
-# mutates any repo.
-#
-# Below the table: Claude Code settings files that hold permission rules
-# (tools/claude-settings-audit.sh). Rules belong in the managed policy in
-# nix-config; a shared .claude/settings.json or a stray .claude/ in a
-# subfolder counts against the verdict, a settings.local.json is listed only.
-#
-# Verdict: a repo is ✅ only when every local column is zero and it has no
-# open PRs and no extra branches. Open issues are shown but don't count —
-# they're backlog, not clutter. Exit code is 0 regardless unless --strict,
-# so `just` recipes stay quiet and CI can still gate on it.
+# One table answering "is the fleet clean enough to start new work?". GitHub
+# data (PRs, issues, extra branches) comes from ONE GraphQL request; nothing
+# here fetches, though jj log/diff may snapshot a dirty working copy. Below
+# it, Claude settings files with permission rules (claude-settings-audit.sh);
+# only settings.local.json is info-only. Open issues never count against the
+# verdict.
 CLEAN_ALLOWED_BRANCHES="main production" # long-lived branches that never count as clutter
 
 cmd_clean() {
@@ -763,11 +675,8 @@ cmd_clean() {
         else
             IFS=$'\t' read -r change state ahead_raw < <(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-ahead" --tsv 2>/dev/null) || ahead_raw="?"
             : "$change" "$ahead_raw"
-            # Everything not yet in trunk — in this working copy, in any
-            # agent workspace, or left behind as an orphaned head (e.g. a
-            # local copy of a change that was squash-merged on GitHub, or
-            # a rebase leftover). jj-ahead only counts trunk()..@ of the
-            # default workspace, which misses the other two.
+            # Everything not in trunk: this @, other workspaces, orphaned heads.
+            # jj-ahead only sees trunk()..@ of the default workspace.
             ahead=$(cd "$dir" && jj log -r 'mutable() & ~empty()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
             files=$(cd "$dir" && jj diff -r @ --summary 2>/dev/null | grep -c . || true)
             conflicts=$(cd "$dir" && jj log -r 'conflicts() & mutable()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
