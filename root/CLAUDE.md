@@ -89,6 +89,10 @@ just jj::ws-gc [filter] [--hours N]      # reap empty/undescribed workspaces old
 - Finish from the workspace: `jj describe`, push, open the PR there. Once the PR merges, `just jj::ws-gc` reaps the workspace and `just pull-all` (or `just abandon-merged`) drops the local copy of the merged change; don't leave either for later.
 - `just clean` is the fleet-wide check that nothing was left behind: dirty working copies, commits not in main, conflicts, open workspaces, PRs, extra branches.
 
+## Code comments
+
+A comment says why the code is this way, in 1–3 lines. History ("was X, replaced with Y"), dates, debugging stories and alternatives tried go in the commit message or PR body, not the file. Keep real gotchas, short. When you edit near a long comment, shorten it too.
+
 ## Secrets
 
 `kleinbem-secrets` is the encrypted secrets repo for the whole fleet (sops + age, per-path scoped recipients — see its own README for the `.sops.yaml` model). It replaced the older per-domain `nix-secrets` / `openwrt-secrets` repos, both fully retired (removed from disk and `repos.nix`). Never assume a plaintext file in any `*-secrets` repo is fine just because the repo's stated purpose is encryption — verify before treating it as safe to read, edit, or reference.
