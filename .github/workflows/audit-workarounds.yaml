@@ -82,7 +82,11 @@ jobs:
             echo >>report.md
           fi
           if ((findings == 0)); then
-            echo "No findings: every workaround links its report, and none of them is merged or closed." >>report.md
+            if ((${#hidden[@]} > 0)); then
+              echo "No findings in the checked repos (the ones above weren't checked)." >>report.md
+            else
+              echo "No findings: every workaround links its report, and none of them is merged or closed." >>report.md
+            fi
           fi
           echo "findings=$findings" >>"$GITHUB_ENV"
           cat report.md >>"$GITHUB_STEP_SUMMARY"
