@@ -32,4 +32,5 @@
   coderabbit = "git@github.com:kleinbem/coderabbit.git";
   coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
   mesh-agents = "git@github.com:kleinbem/mesh-agents.git";
+  nix-revue = "git@github.com:kleinbem-dev/nix-revue.git";
 }
