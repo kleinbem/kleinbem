@@ -75,6 +75,10 @@ sync-agent-links filter="":
     @just jj::sync-agent-links {{filter}}
 
 [group("Main")]
+agent repo name="" runner="claude" *args="":
+    @just jj::agent "{{repo}}" "{{name}}" "{{runner}}" {{args}}
+
+[group("Main")]
 init-bookmarks filter="":
     @just jj::init-bookmarks {{filter}}
 

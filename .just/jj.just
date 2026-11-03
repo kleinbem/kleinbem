@@ -34,6 +34,7 @@ hub:
         "sign-unsigned    — sign unsigned commits ahead of origin" \
         "push-all         — push every repo" \
         "─────────────────────────────────────────────" \
+        "agent            — launch an AI agent in an isolated workspace" \
         "sync             — bootstrap + pull-all" \
         "init-bookmarks   — link local main to origin/main" \
         "quit")
@@ -53,6 +54,12 @@ hub:
         sign-unsigned*)     just jj::sign-unsigned ;;
         push-all*)          just jj::push-all ;;
         sync*)              just jj::sync ;;
+        agent*)
+            repo=$(gum input --placeholder "Target repo (e.g. nix-config)")
+            [ -z "$repo" ] && exit 0
+            runner=$(gum choose --header "Select agent runner" "claude" "goose-local" "goose-cloud" "gemini")
+            name=$(gum input --placeholder "Workspace name (optional, press enter to auto-generate)")
+            just jj::agent "$repo" "$name" "$runner" ;;
         init-bookmarks*)    just jj::init-bookmarks ;;
         *) exit 0 ;;
     esac
@@ -222,3 +229,81 @@ ws-list filter="":
 [group("Agent workspaces")]
 ws-gc filter="" *args="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh workspace-gc {{filter}} {{args}}
+
+# Launch an AI agent inside an isolated Jujutsu workspace.
+# Usage:
+#   just agent <repo> [name] [runner]
+# Runners:
+#   claude (default)  - Claude Code
+#   gemini / agy      - Antigravity / Gemini CLI
+#   goose-local       - Goose with local Qwen3-30B
+#   goose-cloud       - Goose with cloud model
+[group("Agent workspaces")]
+agent repo name="" runner="claude" *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    REPO="{{repo}}"
+    RUNNER="{{runner}}"
+    NAME="{{name}}"
+
+    REPO_DIR="$(ROOT="{{ROOT}}" bash "{{ROOT}}/kleinbem/tools/run-jj-fleet.sh" repo-path "$REPO")"
+    if [ ! -d "$REPO_DIR" ]; then
+        echo "❌ No such repo dir: $REPO ($REPO_DIR)" >&2
+        exit 1
+    fi
+
+    if [ -z "$NAME" ]; then
+        while :; do
+            NAME="agent-$(date +%m%d-%H%M%S)-$RANDOM"
+            [ ! -d "${REPO_DIR}.ws/$NAME" ] && break
+        done
+    fi
+
+    case "$NAME" in
+        */* | *\\* | .. | *..* | .* )
+            echo "❌ Invalid workspace name '$NAME': must not contain path separators or '..'" >&2
+            exit 1
+            ;;
+    esac
+
+    WS_PARENT="$(mkdir -p "${REPO_DIR}.ws" && cd "${REPO_DIR}.ws" && pwd -P)"
+    WS_DIR="$WS_PARENT/$NAME"
+    case "$WS_DIR" in
+        "$WS_PARENT"/*) ;;
+        *)
+            echo "❌ Workspace path escapes workspace directory: $WS_DIR" >&2
+            exit 1
+            ;;
+    esac
+
+    if [ ! -d "$WS_DIR" ]; then
+        ROOT="{{ROOT}}" bash "{{ROOT}}/kleinbem/tools/run-jj-fleet.sh" workspace-new "$REPO" "$NAME" {{args}}
+    fi
+
+    echo "🚀 Entering $REPO workspace '$NAME' with runner '$RUNNER'..."
+    cd "$WS_DIR"
+
+    case "$RUNNER" in
+        goose-local|local)
+            host="${OPENAI_HOST:-}"
+            if [ -z "$host" ] && [ -f "$HOME/.config/goose/config.yaml" ]; then
+                host=$(sed -nE 's/.*"OPENAI_HOST":[[:space:]]*"([^"]+)".*/\1/p' "$HOME/.config/goose/config.yaml" 2>/dev/null || true)
+            fi
+            case "$host" in
+                http://127.0.0.1:*|http://localhost:*) ;;
+                *)
+                    echo "❌ goose-local requires OPENAI_HOST (or ~/.config/goose/config.yaml) set to a loopback endpoint (http://127.0.0.1:* or http://localhost:*)" >&2
+                    exit 1
+                    ;;
+            esac
+            exec goose session --provider openai --model Qwen3-Coder-30B-A3B-Instruct-Q4_K_M ;;
+        goose-cloud|goose)
+            exec goose session ;;
+        claude)
+            exec claude ;;
+        gemini|agy)
+            exec agy ;;
+        *)
+            echo "❌ Unknown runner: $RUNNER (available: claude, gemini, goose-local, goose-cloud)" >&2
+            exit 1 ;;
+    esac
