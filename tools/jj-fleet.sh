@@ -168,6 +168,7 @@ cmd_diff_all() {
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔍 Workspace diff (per-repo, dirty only)"
     for repo in $targets; do
         local name="$repo" dir="$ROOT/$repo"
+        [ -d "$dir" ] || continue
         if [ -n "$(cd "$dir" && jj diff --summary 2>/dev/null)" ]; then
             any=1
             gum style --foreground 212 --padding "0 1" --margin "1 0 0 0" "📦 $name"
@@ -188,6 +189,7 @@ cmd_check_signatures() {
     local rows=("REPO	COMMITS	STATUS	DETAIL")
     for repo in $targets; do
         local name="$repo" dir="$ROOT/$repo" out status ahead detail
+        [ -d "$dir" ] || continue
         out=$(cd "$dir" && "$ROOT/jj-toolbox/bin/jj-check-signatures" 2>&1) && status=0 || status=$?
         ahead=$(printf '%s\n' "$out" | tail -n +2 | grep -c '.' || true)
         if [ "$status" -ne 0 ]; then
@@ -247,6 +249,7 @@ cmd_init_bookmarks() {
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Linking local main ↔ origin/main"
     for repo in $targets; do
         local name="$repo"
+        [ -d "$ROOT/$repo" ] || continue
         gum spin --spinner dot --title "$name..." -- \
             bash -c "cd '$ROOT/$repo' && jj bookmark track main --remote=origin 2>&1 | grep -v 'already tracked' || true"
     done
@@ -262,6 +265,7 @@ cmd_pull_all() {
     # "Abandoned N commits" line is worth showing.
     for repo in $targets; do
         local name="$repo" rpath="$ROOT/$repo" out summary
+        [ -d "$rpath" ] || continue
         out=$(gum spin --spinner dot --title "$name..." --show-output -- \
             bash -c "cd '$rpath' && '$ROOT/jj-toolbox/bin/jj-pull' 2>&1 || true")
         summary=$(printf '%s\n' "$out" | grep -E '^Abandoned [0-9]+ commit' || true)
@@ -361,6 +365,7 @@ cmd_sign_unsigned() {
     local any_done=0
     for repo in $targets; do
         local name="$repo" rpath="$ROOT/$repo" out status
+        [ -d "$rpath" ] || continue
         out=$(cd "$rpath" && "$ROOT/jj-toolbox/bin/jj-sign-unsigned" 2>&1) && status=0 || status=$?
         if printf '%s\n' "$out" | grep -q '^Nothing to sign'; then
             continue
@@ -481,6 +486,7 @@ cmd_branch_all() {
     targets=$(resolve_targets "$filter")
     for repo in $targets; do
         local name="$repo"
+        [ -d "$ROOT/$repo" ] || continue
         gum spin --spinner dot --title "$name..." -- \
             bash -c "cd '$ROOT/$repo' && jj bookmark create '$bookmark_name'"
     done
