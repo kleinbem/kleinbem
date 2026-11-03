@@ -7,8 +7,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib.sh"
 SCRIPT="$HERE/../tools/sync-agent-links.sh"
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+tmp_parent=$(mktemp -d)
+trap 'rm -rf "$tmp_parent"' EXIT
+
+tmp="$tmp_parent/kleinbem"
+mkdir -p "$tmp"
 
 # Create fake kleinbem and repos.nix
 mkdir -p "$tmp/kleinbem/tools"
@@ -85,5 +88,32 @@ bash "$SCRIPT" "$tmp" "repo-a" >/dev/null || rc=$?
 assert_empty "$(readlink "$tmp/repo-a/GEMINI.md" || true)" \
     "hardlink to AGENTS.md left alone"
 assert_eq "1" "$rc" "hardlink causes exit 1"
+
+# Sibling org repo (e.g. kleinbem-dev), with both repo and repo-dev existing
+mkdir -p "$tmp/../kleinbem-dev/repo"
+mkdir -p "$tmp/../kleinbem-dev/repo-dev"
+echo "content-dev" >"$tmp/../kleinbem-dev/repo-dev/AGENTS.md"
+cat <<'EOF' >"$tmp/kleinbem/repos.nix"
+{
+  repo-dev = "git@github.com:kleinbem-dev/repo-dev.git";
+  coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
+}
+EOF
+rc=0
+bash "$SCRIPT" "$tmp" "repo-dev" >/dev/null || rc=$?
+assert_eq "0" "$rc" "sibling org repo run exits 0"
+assert_eq "AGENTS.md" "$(readlink "$tmp/../kleinbem-dev/repo-dev/CLAUDE.md")" \
+    "sibling org repo: CLAUDE.md -> AGENTS.md created in repo-dev, not repo"
+assert_empty "$(readlink "$tmp/../kleinbem-dev/repo/CLAUDE.md" || true)" \
+    "sibling org repo: non-target repo directory untouched"
+
+# Sibling aliased repo (coderabbit-dev -> kleinbem-dev/coderabbit)
+mkdir -p "$tmp/../kleinbem-dev/coderabbit"
+echo "content-coderabbit" >"$tmp/../kleinbem-dev/coderabbit/AGENTS.md"
+rc=0
+bash "$SCRIPT" "$tmp" "coderabbit-dev" >/dev/null || rc=$?
+assert_eq "0" "$rc" "sibling aliased repo run exits 0"
+assert_eq "AGENTS.md" "$(readlink "$tmp/../kleinbem-dev/coderabbit/CLAUDE.md")" \
+    "sibling aliased repo: CLAUDE.md -> AGENTS.md created in coderabbit"
 
 test_summary

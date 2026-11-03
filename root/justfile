@@ -81,10 +81,16 @@ init-bookmarks filter="":
 # Usage:
 #   just in nix-config nixos::switch
 #   just in openwrt-config check core-gateway
-# Pass-through to any repo's own justfile
+# Pass-through to any repo's own justfile (locates in $ROOT or sibling orgs)
 [group("Main")]
 in repo *args:
-    @cd {{ROOT}}/{{repo}} && just {{args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ROOT}}"
+    repo="{{repo}}"
+    dir="$(ROOT="$root" bash "$root/kleinbem/tools/jj-fleet.sh" repo-path "$repo")"
+    cd "$dir"
+    exec just {{args}}
 
 [group("Maintenance")]
 audit-versions filter="":
