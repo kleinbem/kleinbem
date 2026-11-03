@@ -6,7 +6,7 @@ set -euo pipefail
 
 # Search for version pinning patterns in Nix files
 TEMP_FILE=$(mktemp)
-trap "rm -f $TEMP_FILE" EXIT
+trap 'rm -f "$TEMP_FILE"' EXIT
 
 # Find all version assignments (platformToolsVersion, cmdLineToolsVersion, etc.)
 grep -r "Version\s*=\s*\"[0-9]" . --include="*.nix" 2>/dev/null | \

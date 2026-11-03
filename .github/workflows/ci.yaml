@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Actionlint
+        uses: kleinbem/actions/actionlint@9c2dd4246a1f91d324895247e1a390171288ffe0 # v1.1.0
+
+      - name: Syntax check (bash -n)
+        run: |
+          for script in tools/*.sh tests/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: ShellCheck
+        run: |
+          shellcheck -e SC1091,SC2015 -s bash tools/*.sh tests/*.sh
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Tests
+        run: |
+          for t in tests/test-*.sh; do
+            echo "::group::$(basename "$t")"
+            bash "$t"
+            echo "::endgroup::"
+          done

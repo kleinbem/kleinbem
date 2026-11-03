@@ -15,9 +15,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: kleinbem/actions/nix-setup@7ec628296d5194e6e10031706387b992a10a1638 # v1.0.1
         with:
@@ -32,25 +33,27 @@ jobs:
         id: check
         run: |
           if grep -q "⚠️" flake-lock-age.log; then
-            echo "has_stale=true" >> $GITHUB_OUTPUT
+            echo "has_stale=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_stale=false" >> $GITHUB_OUTPUT
+            echo "has_stale=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Alert on stale locks
         if: steps.check.outputs.has_stale == 'true'
         run: |
-          echo "## 📅 Stale Flake Locks Detected" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The following flake.lock files are >30 days old and should be refreshed:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat flake-lock-age.log >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Remediation:** Run \`just in <repo> flake update\` to refresh" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 📅 Stale Flake Locks Detected"
+            echo ""
+            echo "The following flake.lock files are >30 days old and should be refreshed:"
+            echo ""
+            cat flake-lock-age.log
+            echo ""
+            echo "**Remediation:** Run \`just in <repo> flake update\` to refresh"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Archive results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: flake-lock-age-${{ github.run_id }}
           path: flake-lock-age.log
