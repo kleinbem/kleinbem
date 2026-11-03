@@ -237,7 +237,16 @@ cmd_bootstrap() {
     # A differing local file is reported, not overwritten — don't fail the run.
     gum style --foreground 212 "🔗 Workspace-root links"
     bash "$ROOT/kleinbem/tools/link-root-files.sh" "$ROOT" || true
+    gum style --foreground 212 "🔗 Repo agent links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter" || true
     gum style --foreground 46 --margin "1 0" "✅ Workspace bootstrapped."
+}
+
+# --- sync-agent-links ---
+cmd_sync_agent_links() {
+    local filter="${1:-}"
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Syncing AI Discovery Links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter"
 }
 
 # --- init-bookmarks ---
@@ -770,6 +779,7 @@ remote-ci) cmd_remote_ci "$@" ;;
 diff-all) cmd_diff_all "$@" ;;
 check-signatures) cmd_check_signatures "$@" ;;
 bootstrap) cmd_bootstrap "$@" ;;
+sync-agent-links) cmd_sync_agent_links "$@" ;;
 init-bookmarks) cmd_init_bookmarks "$@" ;;
 pull-all) cmd_pull_all "$@" ;;
 save-all) cmd_save_all "$@" ;;

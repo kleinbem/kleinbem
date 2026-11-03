@@ -2,14 +2,14 @@
 # link-root-files.sh <root>
 #
 # The root isn't a repo, so it holds relative symlinks to kleinbem/root/
-# CLAUDE.md, justfile and .envrc. Creates missing links; a same-content file is
-# replaced by the link, a differing one is left alone with a note. Run by `just bootstrap`.
+# AGENTS.md, CLAUDE.md, GEMINI.md, .goosehints, justfile and .envrc. Creates missing links;
+# a same-content file is replaced by the link, a differing one is left alone with a note. Run by `just bootstrap`.
 set -euo pipefail
 
 root="${1:?usage: link-root-files.sh <workspace-root>}"
 status=0
 
-for f in CLAUDE.md justfile .envrc; do
+for f in AGENTS.md CLAUDE.md GEMINI.md .goosehints justfile .envrc; do
     target="kleinbem/root/$f"
     link="$root/$f"
     if [ ! -e "$root/$target" ]; then
