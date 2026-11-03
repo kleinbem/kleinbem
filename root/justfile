@@ -71,6 +71,10 @@ bootstrap filter="":
     @just jj::bootstrap {{filter}}
 
 [group("Main")]
+sync-agent-links filter="":
+    @just jj::sync-agent-links {{filter}}
+
+[group("Main")]
 init-bookmarks filter="":
     @just jj::init-bookmarks {{filter}}
 

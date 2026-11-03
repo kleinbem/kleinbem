@@ -11,22 +11,31 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 mkdir -p "$tmp/kleinbem/root"
-for f in CLAUDE.md justfile .envrc; do
+for f in AGENTS.md justfile .envrc; do
     echo "tracked $f" >"$tmp/kleinbem/root/$f"
+done
+for f in CLAUDE.md GEMINI.md .goosehints; do
+    ln -s AGENTS.md "$tmp/kleinbem/root/$f"
 done
 
 echo "link-root-files.sh"
 
 # Fresh root: justfile matches the tracked copy, .envrc has local edits,
-# CLAUDE.md is missing.
+# agent files are missing.
 echo "tracked justfile" >"$tmp/justfile"
 echo "local edit" >"$tmp/.envrc"
 
 rc=0
 out=$(bash "$SCRIPT" "$tmp") || rc=$?
 
+assert_eq "kleinbem/root/AGENTS.md" "$(readlink "$tmp/AGENTS.md")" \
+    "missing AGENTS.md -> relative link created"
 assert_eq "kleinbem/root/CLAUDE.md" "$(readlink "$tmp/CLAUDE.md")" \
-    "missing file -> relative link created"
+    "missing CLAUDE.md -> relative link created"
+assert_eq "kleinbem/root/GEMINI.md" "$(readlink "$tmp/GEMINI.md")" \
+    "missing GEMINI.md -> relative link created"
+assert_eq "kleinbem/root/.goosehints" "$(readlink "$tmp/.goosehints")" \
+    "missing .goosehints -> relative link created"
 assert_eq "kleinbem/root/justfile" "$(readlink "$tmp/justfile")" \
     "regular file with same content -> replaced with link"
 assert_empty "$(readlink "$tmp/.envrc" || true)" \
@@ -43,8 +52,8 @@ rc=0
 out=$(bash "$SCRIPT" "$tmp") || rc=$?
 assert_eq "kleinbem/root/.envrc" "$(readlink "$tmp/.envrc")" \
     "second run links the freed-up file"
-assert_eq "3" "$(grep -c '(linked)\|(link created)' <<<"$out")" \
-    "second run reports all three linked"
+assert_eq "6" "$(grep -c '(linked)\|(link created)' <<<"$out")" \
+    "second run reports all six linked"
 assert_eq "0" "$rc" "all linked -> exit 0"
 
 # A symlink pointing somewhere else is left alone.

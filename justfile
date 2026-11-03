@@ -51,6 +51,10 @@ sign-unsigned filter="":
 bootstrap filter="":
     @just jj::bootstrap {{filter}}
 
+[group("Main")]
+sync-agent-links filter="":
+    @just jj::sync-agent-links {{filter}}
+
 # Pass-through to any repo's own justfile from the workspace root.
 # Usage:
 #   just in nix-config nixos::switch

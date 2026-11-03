@@ -6,7 +6,7 @@
 # justfile (a symlink; just uses the symlink's directory). The root has
 # kleinbem/repos.nix below it and no .jj; the .jj check matters because nix/
 # has a kleinbem -> ../kleinbem symlink. jj-fleet.sh's find_root() walks up instead.
-ROOT := if path_exists(justfile_directory() / "kleinbem" / "repos.nix") == "true" { if path_exists(justfile_directory() / ".jj") == "false" { justfile_directory() } else { parent_directory(justfile_directory()) } } else { parent_directory(justfile_directory()) }
+ROOT := shell("d=\"" + justfile_directory() + "\"; while [ \"$d\" != \"/\" ]; do if [ -f \"$d/kleinbem/repos.nix\" ] && [ ! -d \"$d/.jj\" ]; then printf '%s' \"$d\"; exit 0; fi; d=\"$(dirname \"$d\")\"; done; echo ''")
 
 # Every repo in kleinbem/repos.nix; the default scope of every fan-out recipe.
 ALL_REPOS := shell("nix eval --raw --file " + ROOT + "/kleinbem/repos.nix --apply 'rs: builtins.concatStringsSep \" \" (builtins.attrNames rs)' 2>/dev/null || echo ''")
