@@ -31,6 +31,6 @@
   actions = "git@github.com:kleinbem/actions.git";
   coderabbit = "git@github.com:kleinbem/coderabbit.git";
   coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
-  mesh-agents = "git@github.com:kleinbem/mesh-agents.git";
+  cadre = "git@github.com:kleinbem-dev/cadre.git";
   revue = "git@github.com:kleinbem-dev/revue.git";
 }
