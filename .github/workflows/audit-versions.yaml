@@ -15,9 +15,10 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: kleinbem/actions/nix-setup@7ec628296d5194e6e10031706387b992a10a1638 # v1.0.1
         with:
@@ -32,21 +33,23 @@ jobs:
         id: check
         run: |
           if grep -q "⚠️\|Error" audit-versions.log; then
-            echo "has_findings=true" >> $GITHUB_OUTPUT
+            echo "has_findings=true" >> "$GITHUB_OUTPUT"
           else
-            echo "has_findings=false" >> $GITHUB_OUTPUT
+            echo "has_findings=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Alert on findings
         if: steps.check.outputs.has_findings == 'true'
         run: |
-          echo "## ⚠️ Version Audit Findings" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          cat audit-versions.log >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## ⚠️ Version Audit Findings"
+            echo ""
+            cat audit-versions.log
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Archive audit results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: audit-versions-${{ github.run_id }}
           path: audit-versions.log

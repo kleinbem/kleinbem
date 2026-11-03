@@ -43,7 +43,7 @@ echo "sync-agent-links.sh"
 
 # Run across all repos
 rc=0
-out=$(bash "$SCRIPT" "$tmp") || rc=$?
+_out=$(bash "$SCRIPT" "$tmp") || rc=$?
 
 # repo-a assertions
 assert_eq "AGENTS.md" "$(readlink "$tmp/repo-a/CLAUDE.md")" \
