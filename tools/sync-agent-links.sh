@@ -35,6 +35,34 @@ get_all_repos() {
     printf '%s\n' "$repos"
 }
 
+resolve_repo_dir() {
+    local root="$1" name="$2"
+    if [ -d "$root/$name" ]; then
+        echo "$root/$name"
+        return 0
+    fi
+    local url=""
+    if [ -f "$root/kleinbem/repos.nix" ]; then
+        url=$(sed -nE 's/^[[:space:]]*"?'"$name"'"?[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$root/kleinbem/repos.nix")
+    fi
+    url="${url#git@github.com:}"
+    url="${url#https://github.com/}"
+    url="${url%.git}"
+    local org="${url%%/*}"
+    local reponame="${url#*/}"
+    if [ -n "$org" ] && [ "$org" != "kleinbem" ]; then
+        if [ -d "$root/../$org/$reponame" ]; then
+            echo "$root/../$org/$reponame"
+            return 0
+        fi
+        if [ -d "$root/../$org/$name" ]; then
+            echo "$root/../$org/$name"
+            return 0
+        fi
+    fi
+    echo "$root/$name"
+}
+
 RESOLVER="$ROOT/kleinbem/tools/resolve-targets.sh"
 ALL_REPOS=$(get_all_repos "$ROOT")
 # shellcheck disable=SC2086 # intentional word-splitting of ALL_REPOS
@@ -42,7 +70,7 @@ TARGETS=$(bash "$RESOLVER" "$FILTER" $ALL_REPOS)
 status=0
 
 for repo in $TARGETS; do
-    dir="$ROOT/$repo"
+    dir="$(resolve_repo_dir "$ROOT" "$repo")"
     [ -d "$dir" ] || continue
 
     if [ ! -f "$dir/AGENTS.md" ]; then

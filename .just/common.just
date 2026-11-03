@@ -14,11 +14,11 @@ ALL_REPOS := shell("nix eval --raw --file " + ROOT + "/kleinbem/repos.nix --appl
 # Alias still used by nix/ and openwrt/ maintenance.just and ai.just.
 REPOS := ALL_REPOS
 
-# --override-input for every repo. A name that isn't an input of the flake only
-# warns ("does not match any input"). | is the sed delimiter because ROOT has slashes.
+# --override-input for every repo. Checks $ROOT/<repo>, then sibling org directories
+# (such as $ROOT/../kleinbem-dev/<repo>).
 # The extra nix-secrets -> kleinbem-secrets mapping is for the old input name;
 # no flake uses it any more (nix-config's input is kleinbem-secrets).
-OVERRIDES := shell("echo '" + ALL_REPOS + "' | tr ' ' '\\n' | grep -vx nix-secrets | tr '\\n' ' ' | sed -E 's|([^ ]+)|--override-input \\1 git+file://" + ROOT + "/\\1|g'") + " --override-input nix-secrets git+file://" + ROOT + "/kleinbem-secrets"
+OVERRIDES := shell("bash -c 'root=\"" + ROOT + "\"; sed -nE \"s/^[[:space:]]*\\\"?([a-zA-Z0-9_.-]+)\\\"?[[:space:]]*=[[:space:]]*\\\"([^\\\"]+)\\\".*/\\\\1 \\\\2/p\" \"$root/kleinbem/repos.nix\" 2>/dev/null | while read -r r url; do [ -z \"$r\" ] || [ \"$r\" = \"nix-secrets\" ] && continue; url=\"${url#git@github.com:}\"; url=\"${url#https://github.com/}\"; url=\"${url%.git}\"; org=\"${url%%/*}\"; reponame=\"${url#*/}\"; if [ -d \"$root/$r\" ]; then p=\"$root/$r\"; elif [ -n \"$org\" ] && [ \"$org\" != \"kleinbem\" ] && [ -d \"$root/../$org/$reponame\" ]; then p=\"$root/../$org/$reponame\"; elif [ -n \"$org\" ] && [ \"$org\" != \"kleinbem\" ] && [ -d \"$root/../$org/$r\" ]; then p=\"$root/../$org/$r\"; else p=\"$root/$r\"; fi; printf \" --override-input %s git+file://%s\" \"$r\" \"$p\"; done' 2>/dev/null") + " --override-input nix-secrets git+file://" + ROOT + "/kleinbem-secrets"
 
 KEEP := "3"
 TIMER := "time "
