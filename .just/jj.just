@@ -254,6 +254,13 @@ agent repo name="" runner="claude" *args:
         exit 1
     fi
 
+    case "$RUNNER" in
+        claude|gemini|agy|goose-local|local|goose-cloud|goose) ;;
+        *)
+            echo "❌ Unknown runner: $RUNNER (available: claude, gemini, agy, goose-local, goose-cloud)" >&2
+            exit 1 ;;
+    esac
+
     if [ -z "$NAME" ]; then
         while :; do
             NAME="agent-$(date +%m%d-%H%M%S)-$RANDOM"
@@ -332,9 +339,11 @@ agent repo name="" runner="claude" *args:
             exec goose session ;;
         claude)
             exec claude ;;
-        gemini|agy)
+        gemini)
+            exec gemini ;;
+        agy)
             exec agy ;;
         *)
-            echo "❌ Unknown runner: $RUNNER (available: claude, gemini, goose-local, goose-cloud)" >&2
+            echo "❌ Unknown runner: $RUNNER (available: claude, gemini, agy, goose-local, goose-cloud)" >&2
             exit 1 ;;
     esac
