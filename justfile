@@ -55,6 +55,11 @@ bootstrap filter="":
 sync-agent-links filter="":
     @just jj::sync-agent-links {{filter}}
 
+[positional-arguments]
+[group("Main")]
+agent repo name="" runner="claude" *args:
+    @just jj::agent "$@"
+
 # Pass-through to any repo's own justfile from the workspace root.
 # Usage:
 #   just in nix-config nixos::switch
