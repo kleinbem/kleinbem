@@ -22,12 +22,20 @@ jobs:
       pull-requests: write
     strategy:
       matrix:
-        repo: [nix-config, nix-devshells, nix-presets, nix-packages, nix-hardware]
+        repo: [kleinbem, nix-config, nix-devshells, nix-presets, nix-packages, nix-hardware]
       fail-fast: false
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: matrix.repo != 'kleinbem'
+        with:
+          repository: kleinbem/${{ matrix.repo }}
+          path: ${{ matrix.repo }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -38,9 +46,21 @@ jobs:
       - name: Audit ${{ matrix.repo }}
         id: audit
         run: |
-          if [ -f "${{ matrix.repo }}/flake.lock" ]; then
-            ./kleinbem/tools/audit-transitive-deps.sh "${{ matrix.repo }}" 2>&1 | tee "audit-${{ matrix.repo }}.log" || audit_failed=1
-            if [ "${audit_failed:-0}" = "1" ]; then
+          repo_dir="${{ matrix.repo }}"
+          if [ "$repo_dir" = "kleinbem" ]; then
+            repo_dir="."
+          fi
+          if [ -f "$repo_dir/flake.lock" ]; then
+            set -o pipefail
+            old_lock=""
+            if git -C "$repo_dir" rev-parse HEAD~1 >/dev/null 2>&1; then
+              if git -C "$repo_dir" show HEAD~1:flake.lock > "$repo_dir/old-flake.lock" 2>/dev/null; then
+                old_lock="$repo_dir/old-flake.lock"
+              fi
+            fi
+            audit_failed=0
+            ./tools/audit-transitive-deps.sh "$repo_dir" ${old_lock:+"$old_lock"} 2>&1 | tee "audit-${{ matrix.repo }}.log" || audit_failed=1
+            if [ "$audit_failed" = "1" ]; then
               echo "has_breaking_changes=true" >> "$GITHUB_OUTPUT"
             fi
           else
@@ -68,6 +88,10 @@ jobs:
           name: audit-transitive-deps-${{ matrix.repo }}-${{ github.run_id }}
           path: audit-${{ matrix.repo }}.log
           retention-days: 90
+
+      - name: Fail if breaking changes detected
+        if: steps.audit.outputs.has_breaking_changes == 'true'
+        run: exit 1
 
   summary:
     runs-on: ubuntu-latest
