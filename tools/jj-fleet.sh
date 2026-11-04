@@ -92,6 +92,12 @@ resolve_targets() {
     bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $ALL_REPOS
 }
 
+# Workaround: gum table uses Go encoding/csv which fails on bare quotes in TSV.
+# no-link: not reported upstream yet.
+print_tsv_table() {
+    tr '"' "'" | gum table -s "$(printf '\t')" --print
+}
+
 # --- status-all ---
 cmd_status_all() {
     local filter="${1:-}" targets
@@ -151,7 +157,7 @@ cmd_remote_status() {
             done
         }
     ')
-    echo "$out" | gum table -s "$(printf '\t')" --print
+    echo "$out" | print_tsv_table
 }
 
 # --- remote-prs ---
@@ -176,7 +182,7 @@ cmd_remote_prs() {
     if [ "$n" -eq 0 ]; then
         gum style --foreground 46 "✓ No open PRs anywhere."
     else
-        echo "$out" | gum table -s "$(printf '\t')" --print
+        echo "$out" | print_tsv_table
     fi
 }
 
@@ -198,7 +204,7 @@ cmd_remote_ci() {
             done
         }
     ')
-    echo "$out" | gum table -s "$(printf '\t')" --print
+    echo "$out" | print_tsv_table
 }
 
 # --- diff-all ---
@@ -249,7 +255,7 @@ cmd_check_signatures() {
             rows+=("$(printf '%s\t%s\t✓ all signed\t—' "$name" "$ahead")")
         fi
     done
-    printf '%s\n' "${rows[@]}" | gum table -s "$(printf '\t')" --print
+    printf '%s\n' "${rows[@]}" | print_tsv_table
     if [ "$any_unsigned" -eq 1 ]; then
         gum style --foreground 196 --margin "1 0" "🔧 Fix unsigned with: just jj::sign-unsigned"
         exit 1
@@ -536,7 +542,7 @@ cmd_sweep_merged() {
         gum style --foreground 46 --margin "1 0" "✅ Every repo in scope is main-only. Nothing to sweep."
         return
     fi
-    printf '%s\n' "${rows[@]}" | gum table -s "$(printf '\t')" --print
+    printf '%s\n' "${rows[@]}" | print_tsv_table
     gum style --foreground 220 --margin "1 0" "ℹ Read-only — nothing deleted. To clean up a flagged branch:"
     gum style --foreground 244 "   jj bookmark forget <branch>                 # local cleanup"
     gum style --foreground 244 "   jj git push --deleted                      # only if it was ever pushed to origin"
@@ -604,7 +610,7 @@ cmd_workspace_list() {
     if [ "$any" -eq 0 ]; then
         gum style --foreground 46 --margin "1 0" "✓ No agent workspaces open."
     else
-        printf '%s\n' "${rows[@]}" | gum table -s "$(printf '\t')" --print
+        printf '%s\n' "${rows[@]}" | print_tsv_table
     fi
 }
 
