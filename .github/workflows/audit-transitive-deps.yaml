@@ -31,6 +31,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: kleinbem/${{ matrix.repo }}
+          path: ${{ matrix.repo }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - uses: kleinbem/actions/nix-setup@7ec628296d5194e6e10031706387b992a10a1638 # v1.0.1
         with:
           nix-path: nixpkgs=channel:nixos-unstable
@@ -39,8 +46,10 @@ jobs:
         id: audit
         run: |
           if [ -f "${{ matrix.repo }}/flake.lock" ]; then
-            ./kleinbem/tools/audit-transitive-deps.sh "${{ matrix.repo }}" 2>&1 | tee "audit-${{ matrix.repo }}.log" || audit_failed=1
-            if [ "${audit_failed:-0}" = "1" ]; then
+            set -o pipefail
+            audit_failed=0
+            ./tools/audit-transitive-deps.sh "${{ matrix.repo }}" 2>&1 | tee "audit-${{ matrix.repo }}.log" || audit_failed=1
+            if [ "$audit_failed" = "1" ]; then
               echo "has_breaking_changes=true" >> "$GITHUB_OUTPUT"
             fi
           else
