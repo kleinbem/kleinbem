@@ -13,8 +13,8 @@ Quick reference guides for common maintenance tasks across the kleinbem fleet.
 |------|---------|------|----------|
 | Check version freshness | `just audit-versions` | Weekly | 2 min |
 | Check flake lock age | `just check-flake-lock-age` | Weekly | 1 min |
-| Update stale flake.lock | `just in <repo> flake update` | When >30 days old | 5-10 min |
-| Rebuild host after update | `just in <repo> nixos::switch` | After config changes | 15-60 min |
+| Update stale flake.lock | `cd <repo> && nix flake update` | When >30 days old | 5-10 min |
+| Rebuild host after update | `just in nix-config dev::apply` | After config changes | 15-60 min |
 | Check CI status | `just remote-ci 10` | Before pushing | 1 min |
 
 ---
