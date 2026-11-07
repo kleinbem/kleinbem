@@ -19,6 +19,10 @@ cat >"$tmp/nix-a/shells/android.nix" <<'NIX'
     "35.0.0"
     "36.0.0"
   ];
+  cmdLineToolsVersion =
+    "13.0";
+  platformVersions =
+    [ "36" ];
   version = "1.2";
 }
 NIX
@@ -26,8 +30,10 @@ cp "$tmp/nix-a/shells/android.nix" "$tmp/nix-a.ws/x/"
 cp "$tmp/nix-a/shells/android.nix" "$tmp/other/"
 
 out="$(bash "$SCRIPT" "$tmp")"
-assert_eq "5" "$(grep -c 'nix-a/shells/android.nix:' <<<"$out")" "single-line pin plus a multiline list, nothing else"
+assert_eq "9" "$(grep -c 'nix-a/shells/android.nix:' <<<"$out")" "single-line pin plus multiline assignments, nothing else"
 assert_eq "1" "$(grep -c '"35.0.0"' <<<"$out")" "list items on later lines are listed"
+assert_eq "1" "$(grep -c '\[ "36" \];' <<<"$out")" "a list opening on the next line is listed"
+assert_eq "1" "$(grep -c '"13.0";' <<<"$out")" "a value on the next line is listed"
 assert_empty "$(grep -E 'nix-a\.ws|other' <<<"$out" || true)" "skips <repo>.ws and non nix-*/openwrt-* dirs"
 assert_eq "1" "$(bash "$SCRIPT" "$tmp" platformTools | grep -c android.nix)" "filter keeps matching lines"
 
