@@ -1,7 +1,7 @@
 name: Check Flake Lock Freshness
 
-# Weekly check that flake.lock files are being kept current
-# Alerts if any flake.lock is >30 days old (stale dependencies)
+# Weekly check of each public repo's locked nixpkgs (flake.lock lastModified).
+# Locks over 30 days old go into one issue, posted only when the list changes.
 
 on:
   schedule:
@@ -10,46 +10,66 @@ on:
 
 permissions:
   contents: read
+  issues: write
+
+concurrency:
+  group: check-flake-lock-age
+  cancel-in-progress: false
+
+# An explicit bash shell runs with pipefail, so `| tee` can't hide a failure.
+defaults:
+  run:
+    shell: bash
+
+env:
+  ISSUE_TITLE: "Audit: flake lock age"
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
           persist-credentials: false
 
-      - uses: kleinbem/actions/nix-setup@7ec628296d5194e6e10031706387b992a10a1638 # v1.0.1
-        with:
-          nix-path: nixpkgs=channel:nixos-unstable
+      - name: Clone the public fleet repos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/fetch-public-repos.sh repos.nix .repos
 
-      - name: Load workspace devshell
+      - name: Check lock age
         run: |
-          nix flake update
-          nix develop .#workspace --command just check-flake-lock-age | tee flake-lock-age.log
-
-      - name: Check for stale locks
-        id: check
-        run: |
-          if grep -q "⚠️" flake-lock-age.log; then
-            echo "has_stale=true" >> "$GITHUB_OUTPUT"
+          # Exit 1 means stale locks; anything higher is an error.
+          rc=0
+          tools/check-flake-lock-age.sh .repos | tee flake-lock-age.log || rc=$?
+          if ((rc > 1)); then
+            echo "::error::check-flake-lock-age.sh failed (exit $rc)"
+            exit 1
+          fi
+          {
+            echo '```'
+            cat flake-lock-age.log
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          # Dates, not day counts, so the issue only changes when a lock does.
+          stale="$(sed -nE 's/^⚠️ +([^:]+): [0-9]+ days old \((.*)\)$/- \1: nixpkgs locked \2/p' flake-lock-age.log)"
+          if [[ -n "$stale" ]]; then
+            {
+              echo "flake.lock files whose nixpkgs is over 30 days old. Refresh with \`just in <repo> nix flake update\`."
+              echo
+              echo "$stale"
+            } >report.md
+            echo "findings=1" >>"$GITHUB_ENV"
           else
-            echo "has_stale=false" >> "$GITHUB_OUTPUT"
+            echo "No flake.lock is over 30 days old." >report.md
+            echo "findings=0" >>"$GITHUB_ENV"
           fi
 
-      - name: Alert on stale locks
-        if: steps.check.outputs.has_stale == 'true'
-        run: |
-          {
-            echo "## 📅 Stale Flake Locks Detected"
-            echo ""
-            echo "The following flake.lock files are >30 days old and should be refreshed:"
-            echo ""
-            cat flake-lock-age.log
-            echo ""
-            echo "**Remediation:** Run \`just in <repo> flake update\` to refresh"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/report-issue.sh "$ISSUE_TITLE" report.md "$findings"
 
       - name: Archive results
         if: always()

@@ -99,42 +99,11 @@ in repo *args:
 
 [group("Maintenance")]
 audit-versions filter="":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔍 Scanning fleet for pinned package versions..."
-    echo ""
-    for repo in {{ROOT}}/nix-*/ {{ROOT}}/openwrt-*/; do
-        [ -d "$repo" ] || continue
-        repo_name=$(basename "$repo")
-        matches=$(grep -r "Version.*=\|version.*=" "$repo" --include="*.nix" 2>/dev/null | grep -E "(platform|build|tools|cmdLine).*Version.*=.*[0-9]+\.[0-9]+" | grep "{{filter}}" || true)
-        if [ -n "$matches" ]; then
-            echo "📦 $repo_name:"
-            echo "$matches" | sed 's/^/  /'
-            echo ""
-        fi
-    done
-    echo "✓ Version audit complete"
+    @bash "{{ROOT}}/kleinbem/tools/audit-versions.sh" "{{ROOT}}" "{{filter}}"
 
 [group("Maintenance")]
 check-flake-lock-age:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📅 Checking flake.lock freshness..."
-    echo ""
-    for lock in {{ROOT}}/*/flake.lock; do
-        repo_name=$(basename "$(dirname "$lock")")
-        days_old=$(( ($(date +%s) - $(stat -c %Y "$lock")) / 86400 ))
-        updated_date=$(stat -c %y "$lock" | cut -d' ' -f1)
-        if [ "$days_old" -gt 30 ]; then
-            echo "⚠️  $repo_name: $days_old days old ($updated_date)"
-        elif [ "$days_old" -gt 14 ]; then
-            echo "📋 $repo_name: $days_old days old ($updated_date)"
-        else
-            echo "✅ $repo_name: $days_old days old ($updated_date)"
-        fi
-    done
-    echo ""
-    echo "💡 Tip: Run 'just in <repo> flake update' to refresh stale locks"
+    @bash "{{ROOT}}/kleinbem/tools/check-flake-lock-age.sh" "{{ROOT}}"
 
 [group("Maintenance")]
 audit-transitive-deps filter="":

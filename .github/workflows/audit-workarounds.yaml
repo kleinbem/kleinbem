@@ -19,6 +19,11 @@ concurrency:
   group: audit-workarounds
   cancel-in-progress: false
 
+# An explicit bash shell runs with pipefail.
+defaults:
+  run:
+    shell: bash
+
 env:
   ISSUE_TITLE: "Audit: workarounds"
 
@@ -48,6 +53,7 @@ jobs:
             echo
           } >report.md
           findings=0
+          checked=0
           hidden=()
           while read -r slug; do
             # The job token sees public repos only: a 404 is a private (or
@@ -61,6 +67,7 @@ jobs:
               exit 1
             fi
             git clone -q --depth 1 "https://github.com/$slug" ".repos/${slug//\//_}" </dev/null
+            checked=$((checked + 1))
             # Exit 1 means findings; anything higher is an error.
             rc=0
             out="$(.nix-toolbox/bin/nix-check-workarounds --states ".repos/${slug//\//_}" </dev/null 2>&1)" || rc=$?
@@ -77,6 +84,11 @@ jobs:
               echo
             } >>report.md
           done < <(grep -oE 'github\.com:[^"]+\.git' repos.nix | sed -E 's/^github\.com://; s/\.git$//' | sort -u)
+          # The repo list comes from a process substitution, whose failure set -e doesn't see.
+          if ((checked == 0)); then
+            echo "::error::no repo was checked"
+            exit 1
+          fi
           if ((${#hidden[@]} > 0)); then
             echo "Not checked (private or gone, not visible to the job token): ${hidden[*]}" >>report.md
             echo >>report.md
@@ -94,17 +106,4 @@ jobs:
       - name: Report
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          issue="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --limit 100 --json number,title \
-            --jq "map(select(.title == \"$ISSUE_TITLE\"))[0].number // empty")"
-          # A clean report only updates an existing issue (the change to clean).
-          if [[ -z "$issue" ]]; then
-            if [[ "$findings" == 1 ]]; then
-              gh issue create --title "$ISSUE_TITLE" --body-file report.md
-            fi
-            exit 0
-          fi
-          last="$(gh issue view "$issue" --json body,comments --jq '(.comments | last | .body) // .body')"
-          if [[ "$last" != "$(cat report.md)" ]]; then
-            gh issue comment "$issue" --body-file report.md
-          fi
+        run: tools/report-issue.sh "$ISSUE_TITLE" report.md "$findings"
