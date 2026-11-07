@@ -35,4 +35,5 @@
   cadre = "git@github.com:kleinbem-dev/cadre.git";
   revue = "git@github.com:kleinbem-dev/revue.git";
   foyer = "git@github.com:kleinbem-dev/foyer.git";
+  attic-ui = "git@github.com:kleinbem-dev/attic-ui.git";
 }
