@@ -19,10 +19,19 @@ for repo in "$root"/nix-*/ "$root"/openwrt-*/; do
     [[ "$repo" == *.ws ]] && continue
     name="$(basename "$repo")"
     scanned=$((scanned + 1))
-    # grep exits 1 for no match, 2 for an error.
-    rc=0
-    matches="$(cd "$root" && grep -rE --include='*.nix' '(platform|build|tools|cmdLine)[A-Za-z]*Versions?[[:space:]]*=.*[0-9]+\.[0-9]+' "$name")" || rc=$?
-    ((rc <= 1)) || { echo "grep failed in $repo" >&2; exit 2; }
+    # A list that opens on the assignment line runs until its closing bracket.
+    # shellcheck disable=SC2016 # $0 is awk's, not the shell's
+    if ! matches="$(cd "$root" && find "$name" -name '*.nix' -type f -print0 | sort -z |
+        xargs -0 -r awk '
+            FNR == 1 { inlist = 0 }
+            inlist { print FILENAME ":" $0; if (/\]/) inlist = 0; next }
+            /(platform|build|tools|cmdLine)[A-Za-z]*Versions?[[:space:]]*=/ {
+                print FILENAME ":" $0
+                if (/\[/ && !/\]/) inlist = 1
+            }')"; then
+        echo "scan failed in $repo" >&2
+        exit 2
+    fi
     [[ -n "$filter" ]] && matches="$(grep -F -- "$filter" <<<"$matches" || true)"
     [[ -n "$matches" ]] || continue
     echo "📦 $name:"

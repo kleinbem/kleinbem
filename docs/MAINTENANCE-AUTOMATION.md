@@ -29,7 +29,7 @@ just audit-versions android  # Only lines mentioning "android"
 - Manual: `just check-flake-lock-age`
 - Weekly: GitHub Actions (Wednesday 09:00 UTC)
 
-**Remediation:** `just in <repo> nix flake update` to refresh. CI opens or updates the issue "Audit: flake lock age".
+**Remediation:** `cd <repo> && nix flake update` to refresh. CI opens or updates the issue "Audit: flake lock age".
 
 **Example:**
 ```bash
@@ -71,7 +71,7 @@ All three audits run as GitHub Actions in `.github/workflows/`:
 | `check-flake-lock-age.yaml` | Manual / Schedule | Wed 09:00 UTC | Opens or updates an issue on stale locks |
 | `audit-transitive-deps.yaml` | PR (flake.lock) / Schedule | Thu 10:00 UTC | Comments on breaking changes |
 
-The scheduled audits shallow-clone the public repos in `repos.nix` (`tools/fetch-public-repos.sh`) and run the same scripts as the `just` recipes. They fail when a scan can't run.
+The version and lock-age audits shallow-clone the public repos in `repos.nix` (`tools/fetch-public-repos.sh`) and run the same scripts as the `just` recipes. They fail when a scan can't run.
 
 ---
 

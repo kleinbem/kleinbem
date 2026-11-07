@@ -54,9 +54,13 @@ jobs:
           } >>"$GITHUB_STEP_SUMMARY"
           # Dates, not day counts, so the issue only changes when a lock does.
           stale="$(sed -nE 's/^⚠️ +([^:]+): [0-9]+ days old \((.*)\)$/- \1: nixpkgs locked \2/p' flake-lock-age.log)"
+          if ((rc == 1)) && [[ -z "$stale" ]]; then
+            echo "::error::the check reported stale locks, but none matched the report pattern"
+            exit 1
+          fi
           if [[ -n "$stale" ]]; then
             {
-              echo "flake.lock files whose nixpkgs is over 30 days old. Refresh with \`just in <repo> nix flake update\`."
+              echo "flake.lock files whose nixpkgs is over 30 days old. Refresh with \`cd <repo> && nix flake update\`."
               echo
               echo "$stale"
             } >report.md

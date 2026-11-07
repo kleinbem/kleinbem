@@ -39,5 +39,5 @@ for lock in "$root"/*/flake.lock; do
 done
 ((checked > 0)) || { echo "no flake.lock under $root" >&2; exit 2; }
 echo
-echo "Refresh a stale lock with: just in <repo> nix flake update"
+echo "Refresh a stale lock with: cd <repo> && nix flake update"
 exit "$stale"
