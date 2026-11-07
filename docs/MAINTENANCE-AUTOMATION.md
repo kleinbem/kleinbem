@@ -7,29 +7,29 @@ Automated auditing and monitoring for the kleinbem infrastructure fleet, derived
 Three complementary systems monitor code quality and dependency health:
 
 ### 1. Version Pinning Audit (`just audit-versions`)
-**Purpose:** Detect pinned package versions approaching deprecation in nixpkgs.
+**Purpose:** List pinned SDK/tool versions so they can be checked against nixpkgs.
 
 **Triggers:**
 - Manual: `just audit-versions [filter]`
 - Weekly: GitHub Actions (Tuesday 09:00 UTC)
 
-**Output:** Lists all `platformToolsVersion`, `androidVersion`, etc., flags any approaching deprecation.
+**Output:** Lists every `platformToolsVersion`, `buildToolsVersions`, etc. in the nix-* and openwrt-* repos. It flags nothing by itself; CI puts the list in the run summary and fails only when the scan can't run.
 
 **Example:**
 ```bash
-just audit-versions nix  # Audit nix-* repos only
+just audit-versions android  # Only lines mentioning "android"
 ```
 
 ---
 
 ### 2. Flake Lock Freshness Check (`just check-flake-lock-age`)
-**Purpose:** Alert when flake.lock files haven't been updated in >30 days.
+**Purpose:** Alert when a repo's locked nixpkgs (`lastModified` in flake.lock) is over 30 days old.
 
 **Triggers:**
 - Manual: `just check-flake-lock-age`
 - Weekly: GitHub Actions (Wednesday 09:00 UTC)
 
-**Remediation:** `just in <repo> flake update` to refresh
+**Remediation:** `cd <repo> && nix flake update` to refresh. CI opens or updates the issue "Audit: flake lock age".
 
 **Example:**
 ```bash
@@ -67,11 +67,11 @@ All three audits run as GitHub Actions in `.github/workflows/`:
 
 | Workflow | Trigger | Schedule | Action |
 |----------|---------|----------|--------|
-| `audit-versions.yaml` | Manual / Schedule | Tue 09:00 UTC | Reports version findings |
-| `check-flake-lock-age.yaml` | Manual / Schedule | Wed 09:00 UTC | Alerts on stale locks |
+| `audit-versions.yaml` | Manual / Schedule | Tue 09:00 UTC | Lists pinned versions in the run summary |
+| `check-flake-lock-age.yaml` | Manual / Schedule | Wed 09:00 UTC | Opens or updates an issue on stale locks |
 | `audit-transitive-deps.yaml` | PR (flake.lock) / Schedule | Thu 10:00 UTC | Comments on breaking changes |
 
-**All workflows archive results for 90 days** in GitHub Actions artifacts.
+The version and lock-age audits shallow-clone the public repos in `repos.nix` (`tools/fetch-public-repos.sh`) and run the same scripts as the `just` recipes. They fail when a scan can't run.
 
 ---
 
