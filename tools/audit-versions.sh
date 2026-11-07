@@ -19,15 +19,16 @@ for repo in "$root"/nix-*/ "$root"/openwrt-*/; do
     [[ "$repo" == *.ws ]] && continue
     name="$(basename "$repo")"
     scanned=$((scanned + 1))
-    # Print the whole assignment, up to its `;`: a list can span lines.
+    # Print the whole assignment, up to its `;` outside a comment: a list can span lines.
     # shellcheck disable=SC2016 # $0 is awk's, not the shell's
     if ! matches="$(cd "$root" && find "$name" -name '*.nix' -type f -print0 | sort -z |
         xargs -0 -r awk '
+            function ends(l) { sub(/#.*/, "", l); return l ~ /;/ }
             FNR == 1 { inlist = 0 }
-            inlist { print FILENAME ":" $0; if (/;/) inlist = 0; next }
+            inlist { print FILENAME ":" $0; if (ends($0)) inlist = 0; next }
             /(platform|build|tools|cmdLine)[A-Za-z]*Versions?[[:space:]]*=/ {
                 print FILENAME ":" $0
-                if (!/;/) inlist = 1
+                if (!ends($0)) inlist = 1
             }')"; then
         echo "scan failed in $repo" >&2
         exit 2

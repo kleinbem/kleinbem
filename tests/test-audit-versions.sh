@@ -15,7 +15,7 @@ mkdir -p "$tmp/nix-a/shells" "$tmp/nix-a.ws/x" "$tmp/other"
 cat >"$tmp/nix-a/shells/android.nix" <<'NIX'
 {
   platformToolsVersion = "37.0.1";
-  buildToolsVersions = [
+  buildToolsVersions = [ # keep in sync; see android.nix
     "35.0.0"
     "36.0.0"
   ];
@@ -31,7 +31,7 @@ cp "$tmp/nix-a/shells/android.nix" "$tmp/other/"
 
 out="$(bash "$SCRIPT" "$tmp")"
 assert_eq "9" "$(grep -c 'nix-a/shells/android.nix:' <<<"$out")" "single-line pin plus multiline assignments, nothing else"
-assert_eq "1" "$(grep -c '"35.0.0"' <<<"$out")" "list items on later lines are listed"
+assert_eq "1" "$(grep -c '"35.0.0"' <<<"$out")" "list items on later lines are listed, past a ; in a comment"
 assert_eq "1" "$(grep -c '\[ "36" \];' <<<"$out")" "a list opening on the next line is listed"
 assert_eq "1" "$(grep -c '"13.0";' <<<"$out")" "a value on the next line is listed"
 assert_empty "$(grep -E 'nix-a\.ws|other' <<<"$out" || true)" "skips <repo>.ws and non nix-*/openwrt-* dirs"
