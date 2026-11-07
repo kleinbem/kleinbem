@@ -34,4 +34,5 @@
   coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
   cadre = "git@github.com:kleinbem-dev/cadre.git";
   revue = "git@github.com:kleinbem-dev/revue.git";
+  foyer = "git@github.com:kleinbem-dev/foyer.git";
 }
