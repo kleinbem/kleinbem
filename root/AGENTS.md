@@ -46,6 +46,13 @@ A comment says why the code is this way, in 1–3 lines. History ("was X, replac
 dates, debugging stories and alternatives tried go in the commit message or PR body, not the
 file. Keep real gotchas, short. When you edit near a long comment, shorten it too.
 
+## Nixpkgs maintainer
+
+Martin maintains Nixpkgs packages (`kleinbem` in `meta.maintainers`). Others' PRs, review
+requests and Hydra or r-ryantm failures for them land daily in the open kleinbem/nix-packages
+issue "Watch: maintained nixpkgs packages". Work on them follows the `upstream-contributing` and
+`nixpkgs-maintaining` skills.
+
 ## Secrets
 
 `kleinbem-secrets` holds the fleet's sops + age secrets. Never assume a plaintext file in any
