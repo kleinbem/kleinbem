@@ -278,7 +278,7 @@ jj git push -b <branch>
 
 # A fix for main gets its own bookmark and PR (main only takes PRs):
 jj bookmark create <new-branch> -r @
-jj git push -b <new-branch> --allow-new
+jj git push -b <new-branch>
 ```
 
 ---
