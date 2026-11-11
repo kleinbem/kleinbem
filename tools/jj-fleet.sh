@@ -1,0 +1,892 @@
+#!/usr/bin/env bash
+# jj-fleet: the fleet dashboard behind the jj:: just recipes, packaged in
+# kleinbem/flake.nix. Per-repo jj work is delegated to jj-toolbox/bin/*; this
+# script fans it out over repos.nix and builds the tables.
+#
+# ROOT comes from the env (just passes it) or by walking up from $PWD to the
+# directory holding kleinbem/repos.nix, so it runs from anywhere in the workspace.
+#
+# Usage: jj-fleet <subcommand> [args...]
+set -euo pipefail
+
+find_root() {
+    local dir="$PWD"
+    while [ "$dir" != "/" ]; do
+        # Skip repos: nix/ has a kleinbem -> ../kleinbem symlink.
+        if [ -f "$dir/kleinbem/repos.nix" ] && [ ! -d "$dir/.jj" ]; then
+            printf '%s\n' "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    echo "jj-fleet: could not find the workspace root (no kleinbem/repos.nix found walking up from $PWD)" >&2
+    return 1
+}
+
+ROOT="${ROOT:-$(find_root)}"
+
+ALL_REPOS=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
+    --apply 'rs: builtins.concatStringsSep " " (builtins.attrNames rs)' 2>/dev/null || true)
+
+# "name url" per repo, so gh_repo_of needs no nix eval per call.
+# shellcheck disable=SC2016 # ${n} is Nix interpolation, not shell
+ALL_REPO_URLS="$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
+    --apply 'rs: builtins.concatStringsSep "\n" (map (n: "${n} ${rs.${n}}") (builtins.attrNames rs))' 2>/dev/null || true)"
+if [ -z "$ALL_REPO_URLS" ] && [ -f "$ROOT/kleinbem/repos.nix" ]; then
+    ALL_REPO_URLS=$(sed -nE 's/^[[:space:]]*"?([a-zA-Z0-9_.-]+)"?[[:space:]]*=[[:space:]]*"([^"]+)".*/\1 \2/p' "$ROOT/kleinbem/repos.nix")
+fi
+export ALL_REPO_URLS
+
+# GitHub "owner/name" from the repo's URL in repos.nix; repos live under both
+# kleinbem and kleinbem-dev. Exported for the `bash -c` children below.
+gh_repo_of() {
+    local name u url=""
+    while read -r name u; do
+        [ "$name" = "$1" ] && { url="$u"; break; }
+    done <<<"$ALL_REPO_URLS"
+    url="${url#git@github.com:}"
+    url="${url#https://github.com/}"
+    url="${url%.git}"
+    echo "${url:-kleinbem/$1}"
+}
+export -f gh_repo_of
+
+# Finds the on-disk directory for a repository:
+# 1. $ROOT/<name> (primary workspace directory)
+# 2. $ROOT/../<org>/<reponame> (sibling org directory, e.g. kleinbem-dev/cadre)
+# 3. $ROOT/../<org>/<name> (sibling org directory with key name)
+# 4. Default target based on repos.nix URL owner
+repo_path() {
+    local name="${1:?repo required}"
+    [ -n "$name" ] || return 1
+    if [ -d "$ROOT/$name" ]; then
+        printf '%s\n' "$ROOT/$name"
+        return 0
+    fi
+    local ghrepo
+    ghrepo=$(gh_repo_of "$name")
+    local org="${ghrepo%%/*}"
+    local reponame="${ghrepo#*/}"
+    if [ "$org" != "kleinbem" ]; then
+        if [ -d "$ROOT/../$org/$reponame" ]; then
+            printf '%s\n' "$ROOT/../$org/$reponame"
+            return 0
+        fi
+        if [ -d "$ROOT/../$org/$name" ]; then
+            printf '%s\n' "$ROOT/../$org/$name"
+            return 0
+        fi
+    fi
+    if [ "$org" = "kleinbem" ]; then
+        printf '%s\n' "$ROOT/$name"
+    else
+        printf '%s\n' "$ROOT/../$org/$reponame"
+    fi
+}
+export -f repo_path
+
+JJ_TOOLBOX="${JJ_TOOLBOX:-$(repo_path jj-toolbox)}"
+
+resolve_targets() {
+    # shellcheck disable=SC2086 # intentional word-splitting of ALL_REPOS
+    bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $ALL_REPOS
+}
+
+# Workaround: gum table uses Go encoding/csv which fails on bare quotes in TSV.
+# no-link: not reported upstream yet.
+print_tsv_table() {
+    tr '"' "'" | gum table -s "$(printf '\t')" --print
+}
+
+# --- status-all ---
+cmd_status_all() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📊 Workspace Status (jj)"
+    # Per-repo state comes from jj-toolbox's jj-ahead; this adds the REPO column.
+    {
+        printf "REPO\tCHANGE\t@ STATE\tAHEAD OF ORIGIN\n"
+        for repo in $targets; do
+            local dir
+            dir="$(repo_path "$repo")"
+            local name="$repo" change state ahead ready_part undesc_part
+            [ -d "$dir" ] || continue
+            IFS=$'\t' read -r change state ahead < <(cd "$dir" && "$JJ_TOOLBOX/bin/jj-ahead" --tsv 2>/dev/null) || continue
+            [ -z "$change" ] && continue
+            case "$state" in
+                "(empty)") : ;;
+                UNDESCRIBED) state="⚠ undescribed" ;;
+                *) state="📝 $state" ;;
+            esac
+            case "$ahead" in
+                none) ahead="(none)" ;;
+                *,*)
+                    # "N ready, M undescribed" -> "📝N ⚠M (mixed)"
+                    ready_part="${ahead%%,*}"
+                    undesc_part="${ahead#*, }"
+                    ahead="📝${ready_part%% *} ⚠${undesc_part%% *} (mixed)"
+                    ;;
+                *undescribed) ahead="⚠ $ahead" ;;
+                *ready) ahead="📝 $ahead" ;;
+            esac
+            printf "%s\t%s\t%s\t%s\n" "$name" "$change" "$state" "$ahead"
+        done
+    } | column -t -s $'\t'
+}
+
+# --- remote-status ---
+cmd_remote_status() {
+    local filter="${1:-}" targets out
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📡 Remote Workspace Status (GitHub)"
+    export ROOT targets JJ_TOOLBOX
+    # shellcheck disable=SC2016 # single-quoted on purpose: $targets/$repo/etc are expanded by the child bash -c, not here
+    out=$(gum spin --spinner dot --title "Querying GitHub..." --show-output -- bash -c '
+        {
+            printf "REPO\tMAIN\tCI\tPRs\tISSUES\n"
+            for repo in $targets; do
+                name="$repo"
+                ghrepo=$(gh_repo_of "$repo")
+                rpath=$(repo_path "$repo")
+                sha=$(git -C "$rpath" rev-parse --short origin/main 2>/dev/null || echo "?")
+                ci=$(gh run list --repo "$ghrepo" --branch main --limit 1 --json conclusion,status \
+                    --jq ".[0] | if .status==\"in_progress\" then \"🔄\" elif .conclusion==\"success\" then \"✅\" elif .conclusion==\"failure\" then \"❌\" elif .conclusion==\"cancelled\" then \"⏹\" else \"?\" end" 2>/dev/null || echo "—")
+                prs=$(gh pr list --repo "$ghrepo" --state open --json number --jq "length" 2>/dev/null || echo "?")
+                issues=$(gh issue list --repo "$ghrepo" --state open --json number --jq "length" 2>/dev/null || echo "?")
+                printf "%s\t%s\t%s\t%s\t%s\n" "$name" "$sha" "$ci" "$prs" "$issues"
+            done
+        }
+    ')
+    echo "$out" | print_tsv_table
+}
+
+# --- remote-prs ---
+cmd_remote_prs() {
+    local filter="${1:-}" targets out n
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔀 Open PRs across the workspace"
+    export targets
+    # shellcheck disable=SC2016 # single-quoted on purpose: $targets/$repo/etc are expanded by the child bash -c, not here
+    out=$(gum spin --spinner dot --title "Fetching PRs..." --show-output -- bash -c '
+        {
+            printf "REPO\t#\tTITLE\tAUTHOR\n"
+            for repo in $targets; do
+                name="$repo"
+                ghrepo=$(gh_repo_of "$repo")
+                gh pr list --repo "$ghrepo" --state open --json number,title,author \
+                    --jq ".[] | \"$name\t#\(.number)\t\(.title)\t@\(.author.login)\"" 2>/dev/null || true
+            done
+        }
+    ')
+    n=$(echo "$out" | tail -n +2 | grep -c .)
+    if [ "$n" -eq 0 ]; then
+        gum style --foreground 46 "✓ No open PRs anywhere."
+    else
+        echo "$out" | print_tsv_table
+    fi
+}
+
+# --- remote-ci ---
+cmd_remote_ci() {
+    local limit="${1:-5}" filter="${2:-}" targets out
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🚦 Recent CI runs (last $limit per repo)"
+    export targets limit
+    # shellcheck disable=SC2016 # single-quoted on purpose: $targets/$repo/etc are expanded by the child bash -c, not here
+    out=$(gum spin --spinner dot --title "Fetching CI runs..." --show-output -- bash -c '
+        {
+            printf "REPO\tSTATUS\tWORKFLOW\tTITLE\n"
+            for repo in $targets; do
+                name="$repo"
+                ghrepo=$(gh_repo_of "$repo")
+                gh run list --repo "$ghrepo" --limit "$limit" --json conclusion,status,name,displayTitle \
+                    --jq ".[] | \"$name\t\(if .status==\"in_progress\" then \"🔄\" elif .status==\"queued\" then \"⏳\" elif .conclusion==\"success\" then \"✅\" elif .conclusion==\"failure\" then \"❌\" elif .conclusion==\"cancelled\" then \"⏹\" elif .conclusion==\"skipped\" then \"⏭\" else \"?\" end)\t\(.name)\t\(.displayTitle)\"" 2>/dev/null || true
+            done
+        }
+    ')
+    echo "$out" | print_tsv_table
+}
+
+# --- diff-all ---
+cmd_diff_all() {
+    local filter="${1:-}"
+    shift || true
+    local targets any=0
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔍 Workspace diff (per-repo, dirty only)"
+    for repo in $targets; do
+        local name="$repo" dir
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        if [ -n "$(cd "$dir" && jj diff --summary 2>/dev/null)" ]; then
+            any=1
+            gum style --foreground 212 --padding "0 1" --margin "1 0 0 0" "📦 $name"
+            (cd "$dir" && jj diff "$@")
+        fi
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ Workspace clean — no uncommitted changes anywhere."
+    fi
+}
+
+# --- check-signatures ---
+cmd_check_signatures() {
+    local filter="${1:-}" targets any_unsigned=0 any_unverified=0
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signature audit (commits ahead of origin/main)"
+    # Per-repo audit is jj-toolbox's jj-check-signatures; this folds it into one table.
+    local rows=("REPO	COMMITS	STATUS	DETAIL")
+    for repo in $targets; do
+        local name="$repo" dir out status ahead detail
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        out=$(cd "$dir" && "$JJ_TOOLBOX/bin/jj-check-signatures" 2>&1) && status=0 || status=$?
+        ahead=$(printf '%s\n' "$out" | tail -n +2 | grep -c '.' || true)
+        if [ "$status" -ne 0 ]; then
+            detail=$(printf '%s\n' "$out" | grep -m1 'UNSIGNED' || echo "—")
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "❌ UNSIGNED" "$detail")")
+            any_unsigned=1
+        elif printf '%s\n' "$out" | grep -q 'unverified'; then
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$ahead" "⚠ unverified" "—")")
+            any_unverified=1
+        elif printf '%s\n' "$out" | grep -q 'nothing to check'; then
+            rows+=("$(printf '%s\t0\t✓ none\t—' "$name")")
+        else
+            rows+=("$(printf '%s\t%s\t✓ all signed\t—' "$name" "$ahead")")
+        fi
+    done
+    printf '%s\n' "${rows[@]}" | print_tsv_table
+    if [ "$any_unsigned" -eq 1 ]; then
+        gum style --foreground 196 --margin "1 0" "🔧 Fix unsigned with: just jj::sign-unsigned"
+        exit 1
+    elif [ "$any_unverified" -eq 1 ]; then
+        gum style --foreground 220 --margin "1 0" "ℹ Unverified ≠ rejected. Push will likely succeed; local mismatch is cosmetic."
+    else
+        gum style --foreground 46 --margin "1 0" "✅ All ahead-of-origin commits are signed and verified"
+    fi
+}
+
+# --- bootstrap ---
+cmd_bootstrap() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌱 Bootstrapping workspace from kleinbem/repos.nix"
+    for repo in $targets; do
+        local rpath
+        rpath="$(repo_path "$repo")"
+        if [ -d "$rpath" ]; then
+            gum style --foreground 46 "  ✓ $repo (already cloned)"
+        else
+            mkdir -p "$(dirname "$rpath")"
+            local url
+            url=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" --apply "rs: rs.\"$repo\"")
+            gum spin --spinner dot --title "cloning $repo..." -- bash -c "
+                git clone '$url' '$rpath' >/dev/null 2>&1
+                cd '$rpath' && jj git init --colocate >/dev/null 2>&1 && jj bookmark track main --remote=origin >/dev/null 2>&1
+            "
+            gum style --foreground 46 "  ✓ $repo cloned + jj-initialised"
+        fi
+    done
+    # Root files (CLAUDE.md, justfile, .envrc) are symlinks into kleinbem/root/.
+    # A differing local file is reported, not overwritten — don't fail the run.
+    gum style --foreground 212 "🔗 Workspace-root links"
+    bash "$ROOT/kleinbem/tools/link-root-files.sh" "$ROOT" || true
+    gum style --foreground 212 "🔗 Repo agent links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter" || true
+    gum style --foreground 46 --margin "1 0" "✅ Workspace bootstrapped."
+}
+
+# --- sync-agent-links ---
+cmd_sync_agent_links() {
+    local filter="${1:-}"
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Syncing AI Discovery Links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter"
+}
+
+# --- init-bookmarks ---
+cmd_init_bookmarks() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Linking local main ↔ origin/main"
+    for repo in $targets; do
+        local name="$repo" rpath
+        rpath="$(repo_path "$repo")"
+        [ -d "$rpath" ] || continue
+        gum spin --spinner dot --title "$name..." -- \
+            bash -c "cd '$rpath' && jj bookmark track main --remote=origin 2>&1 | grep -v 'already tracked' || true"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ Bookmark tracking ensured."
+}
+
+# --- pull-all ---
+cmd_pull_all() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📥 Fetching + rebasing all repositories"
+    # jj-toolbox's jj-pull does fetch+rebase+abandon-merged; only its
+    # "Abandoned N commits" line is worth showing.
+    for repo in $targets; do
+        local name="$repo" rpath out summary
+        rpath="$(repo_path "$repo")"
+        [ -d "$rpath" ] || continue
+        out=$(gum spin --spinner dot --title "$name..." --show-output -- \
+            bash -c "cd '$rpath' && '$JJ_TOOLBOX/bin/jj-pull' 2>&1 || true")
+        summary=$(printf '%s\n' "$out" | grep -E '^Abandoned [0-9]+ commit' || true)
+        [ -n "$summary" ] && gum style --foreground 244 "  $name: $summary"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ pull-all complete. Run: just jj::status-all"
+}
+
+# --- save-all ---
+cmd_save_all() {
+    local msg="${1:-}" filter="${2:-}"
+    if [ -z "$msg" ]; then
+        msg=$(gum input --header "Commit message" --placeholder "feat(...): ...")
+    fi
+    if [ -z "$msg" ]; then
+        gum style --foreground 196 "❌ No message provided. Aborting."
+        exit 1
+    fi
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "💾 Saving workspace state: $msg"
+    local targets
+    targets=$(resolve_targets "$filter")
+    local author=""
+    local sec_path cfg_path
+    sec_path="$(repo_path kleinbem-secrets)"
+    cfg_path="$(repo_path nix-config)"
+    if [ -n "${KLEINBEM_PERSONA:-}" ]; then
+        # full-name/email only exist in lib/personas.nix's joined view.
+        # personas/contact.nix is plain Nix (the data goes public with the
+        # first commit anyway), so no sops decrypt is needed here.
+        author=$(nix eval --raw --impure --expr "
+            let
+              lib = (import <nixpkgs> {}).lib;
+              contact = import $sec_path/personas/contact.nix;
+              p = import $cfg_path/lib/personas.nix { inherit lib contact; };
+            in p.all.${KLEINBEM_PERSONA}.\"full-name\" + \" <\" + p.all.${KLEINBEM_PERSONA}.email + \">\"
+        " 2>/dev/null)
+        gum style --foreground 99 "🎭 Acting as: $author"
+    fi
+    # Classify dirty repos first: in a fan-out save, a repo whose ONLY change
+    # is flake.lock churn gets a lockfile message instead of the unrelated
+    # fan-out message. If EVERY dirty repo is lock-only, the given message is
+    # kept — that's a deliberate lock bump.
+    local dirty=() lockonly=() nonlock=0
+    for repo in $targets; do
+        local rpath summary
+        rpath="$(repo_path "$repo")"
+        [ -d "$rpath" ] || continue
+        summary=$(cd "$rpath" 2>/dev/null && jj diff --summary 2>/dev/null) || summary=""
+        if [ -n "$summary" ]; then
+            dirty+=("$repo")
+            if printf '%s\n' "$summary" | grep -qv 'flake\.lock$'; then
+                nonlock=1
+            else
+                lockonly+=("$repo")
+            fi
+        fi
+    done
+    local any=0
+    for repo in ${dirty[@]+"${dirty[@]}"}; do
+        local name="$repo" rpath rmsg="$msg"
+        rpath="$(repo_path "$repo")"
+        any=1
+        if [ "$nonlock" -eq 1 ] && printf '%s\n' ${lockonly[@]+"${lockonly[@]}"} | grep -qxF -- "$repo"; then
+            rmsg="chore: update flake lockfiles"
+        fi
+        gum style --foreground 212 "  📝 $name — describing ($rmsg)..."
+        # Show exactly what's being committed — a fan-out save can otherwise
+        # silently scoop another session's in-flight work.
+        (cd "$rpath" && jj diff --summary 2>/dev/null | sed 's/^/     /')
+        local save_args=("$rmsg")
+        [ -n "$author" ] && save_args=(--author "$author" "$rmsg")
+        (cd "$rpath" && "$JJ_TOOLBOX/bin/jj-save" "${save_args[@]}") >/dev/null 2>&1
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 220 --margin "1 0" "✓ Workspace clean — nothing to describe."
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Workspace state saved."
+    fi
+}
+
+# --- save (single repo, fan-out-free) ---
+cmd_save() {
+    local repo="${1:?repo required}" msg="${2:?message required}"
+    local dir
+    dir="$(repo_path "$repo")"
+    [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo ($dir)"; exit 1; }
+    local summary
+    summary=$(cd "$dir" && jj diff --summary 2>/dev/null) || summary=""
+    if [ -z "$summary" ]; then
+        gum style --foreground 220 "✓ $repo clean — nothing to describe."
+        exit 0
+    fi
+    printf '%s\n' "$summary" | sed 's/^/  /'
+    (cd "$dir" && "$JJ_TOOLBOX/bin/jj-save" "$msg") >/dev/null 2>&1
+    gum style --foreground 46 "✅ $repo described: $msg"
+}
+
+# --- sign-unsigned ---
+cmd_sign_unsigned() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔐 Signing unsigned commits ahead of origin"
+    # Per-repo signing is jj-toolbox's jj-sign-unsigned.
+    local any_done=0
+    for repo in $targets; do
+        local name="$repo" rpath out status
+        rpath="$(repo_path "$repo")"
+        [ -d "$rpath" ] || continue
+        out=$(cd "$rpath" && "$JJ_TOOLBOX/bin/jj-sign-unsigned" 2>&1) && status=0 || status=$?
+        if printf '%s\n' "$out" | grep -q '^Nothing to sign'; then
+            continue
+        fi
+        any_done=1
+        if [ "$status" -eq 0 ]; then
+            local header rest
+            header=$(printf '%s\n' "$out" | head -1)
+            rest=$(printf '%s\n' "$out" | tail -n +2)
+            gum style --foreground 212 "  🖊  $name — ${header,,}"
+            [ -n "$rest" ] && printf '%s\n' "$rest" | sed 's/^/    ↳ /'
+        else
+            gum style --foreground 196 "  ⚠ rebase failed in $name — fix manually"
+            printf '%s\n' "$out" | sed 's/^/    /'
+        fi
+    done
+    if [ "$any_done" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ Nothing to sign — all ahead-of-origin commits already signed"
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Done. Verify with: just jj::check-signatures"
+    fi
+}
+
+# --- push-all ---
+cmd_push_all() {
+    local filter="${1:-}" targets
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "📤 Pushing all changes (verified on origin)"
+    targets=$(resolve_targets "$filter")
+    local failed=()
+    for repo in $targets; do
+        local name="$repo" rpath url
+        rpath="$(repo_path "$repo")"
+        url="https://github.com/$(gh_repo_of "$repo").git"
+        (
+        cd "$rpath" 2>/dev/null || { gum style --foreground 196 "  ❌ $name (dir missing: $rpath)"; exit 1; }
+        target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
+        [ -z "$target" ] && { gum style --foreground 244 "  ⏭  $name (no main bookmark)"; exit 0; }
+        before=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
+        # A described commit past main hasn't been advanced onto the
+        # bookmark yet (jj-push does that itself) — only skip when there's
+        # truly nothing to advance AND remote already matches.
+        pending=$(jj log -r 'main..@' --no-graph -T 'description' 2>/dev/null)
+        [ "$before" = "$target" ] && [ -z "$pending" ] && { gum style --foreground 244 "  ✓ $name up to date (${target:0:12})"; exit 0; }
+        # jj-toolbox's jj-push does the push (and one fetch+rebase retry);
+        # this loop verifies the result against origin.
+        out=$("$JJ_TOOLBOX/bin/jj-push" 2>&1 || true)
+        target=$(jj log -r main --no-graph -T 'commit_id' 2>/dev/null)
+        after=$(git -c credential.helper= -c credential.helper='!gh auth git-credential' ls-remote "$url" refs/heads/main 2>/dev/null | cut -f1)
+        if [ "$after" = "$target" ] && [ -n "$target" ]; then
+            git update-ref refs/remotes/origin/main "$target" 2>/dev/null || true
+            jj git import >/dev/null 2>&1 || true
+            gum style --foreground 46 "  ✅ $name → ${target:0:12} (verified on origin)"
+        else
+            gum style --foreground 196 "  ❌ $name — remote still ${after:0:12}, NOT pushed"
+            printf '%s\n' "$out" | grep -iE 'rejected|error|denied|signature|fetch first|behind|protected' | sed 's/^/     /' | head -3
+            exit 1
+        fi
+        ) || failed+=("$name")
+    done
+    if [ ${#failed[@]} -gt 0 ]; then
+        gum style --foreground 196 --margin "1 0" "❌ NOT pushed: ${failed[*]}"
+        gum style --foreground 220 "   ↳ diverged remote → 'just jj::pull-all' then retry  ·  unsigned → 'just jj::sign-unsigned'  ·  scope → 'gh auth refresh -s workflow'"
+        exit 1
+    else
+        gum style --foreground 46 --margin "1 0" "✅ All pushes verified on origin."
+    fi
+}
+
+# --- sync (bootstrap + pull-all) ---
+cmd_sync() {
+    local filter="${1:-}"
+    cmd_bootstrap "$filter"
+    cmd_pull_all "$filter"
+}
+
+# --- sweep-merged ---
+# Read-only: reports local branches other than main and whether they are on
+# origin/main (detection lives in jj-toolbox's jj-sweep-merged). Never deletes:
+# a heuristic false positive across the fleet is worse than one manual step.
+cmd_sweep_merged() {
+    local filter="${1:-}" targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Branch sweep — local branches vs. origin/main"
+    local rows=("REPO	BRANCH	STATUS	DETAIL") any=0
+    for repo in $targets; do
+        local dir name="$repo" out
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        out=$(cd "$dir" && "$JJ_TOOLBOX/bin/jj-sweep-merged" --tsv 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        any=1
+        while IFS=$'\t' read -r branch status detail; do
+            [ -z "$branch" ] && continue
+            case "$status" in
+                MERGED) status="✅ MERGED" ;;
+                RESIDUE) status="🗑 RESIDUE" ;;
+                *) status="⚠ $status" ;;
+            esac
+            rows+=("$(printf '%s\t%s\t%s\t%s' "$name" "$branch" "$status" "$detail")")
+        done <<<"$out"
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✅ Every repo in scope is main-only. Nothing to sweep."
+        return
+    fi
+    printf '%s\n' "${rows[@]}" | print_tsv_table
+    gum style --foreground 220 --margin "1 0" "ℹ Read-only — nothing deleted. To clean up a flagged branch:"
+    gum style --foreground 244 "   jj bookmark forget <branch>                 # local cleanup"
+    gum style --foreground 244 "   jj git push --deleted                      # only if it was ever pushed to origin"
+    gum style --foreground 244 "   git branch -r -D pr/<N> && jj git import   # for gh-pr-checkout residue"
+}
+
+# --- branch-all ---
+cmd_branch_all() {
+    # Not "name": the loop below uses $name as its own local.
+    local bookmark_name="${1:?bookmark name required}" filter="${2:-}"
+    gum confirm "🌿 Create bookmark '$bookmark_name' across the workspace?" || exit 0
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌿 Creating bookmark '$bookmark_name'"
+    local targets
+    targets=$(resolve_targets "$filter")
+    for repo in $targets; do
+        local name="$repo" rpath
+        rpath="$(repo_path "$repo")"
+        [ -d "$rpath" ] || continue
+        gum spin --spinner dot --title "$name..." -- \
+            bash -c "cd '$rpath' && jj bookmark create '$bookmark_name'"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ Bookmark created."
+}
+
+# --- workspace-new / workspace-list / workspace-gc ---
+# Each session gets its own working copy at <repo>.ws/<name>/ (jj-only, no
+# .git), outside repos.nix so no *-all recipe touches it.
+cmd_workspace_new() {
+    local repo="${1:?repo required}" name="${2:-}"
+    shift; [ $# -gt 0 ] && shift
+    # Anything left (e.g. `-r <change-id>`) is handed to jj-ws-new as is.
+    local dir
+    dir="$(repo_path "$repo")"
+    [ -d "$dir" ] || { gum style --foreground 196 "❌ No such repo dir: $repo ($dir)"; exit 1; }
+    # Resolve the name here (rather than letting jj-ws-new auto-generate
+    # one) so this can print the exact path without parsing its output.
+    [ -z "$name" ] && name="ws-$(date +%H%M%S)-$RANDOM"
+    local ws_path="${dir}.ws/$name"
+    if (cd "$dir" && "$JJ_TOOLBOX/bin/jj-ws-new" "$name" "$@") >/dev/null 2>&1; then
+        gum style --foreground 46 --margin "1 0" "✅ Workspace '$name' ready — cd here and work:"
+        gum style --foreground 212 "   cd $ws_path"
+    else
+        gum style --foreground 196 "❌ jj workspace add failed — is trunk tracked here? Try: just jj::init-bookmarks $repo"
+        exit 1
+    fi
+}
+
+cmd_workspace_list() {
+    local filter="${1:-}" targets any=0
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🗂  Agent workspaces"
+    local rows=("REPO	WORKSPACE	@ STATE	DIR")
+    for repo in $targets; do
+        local dir out
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        out=$(cd "$dir" && "$JJ_TOOLBOX/bin/jj-ws-list" --tsv 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        any=1
+        while IFS=$'\t' read -r wname state wroot; do
+            [ -z "$wname" ] && continue
+            rows+=("$(printf '%s\t%s\t%.40s\t%s' "$repo" "$wname" "$state" "$wroot")")
+        done <<<"$out"
+    done
+    if [ "$any" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ No agent workspaces open."
+    else
+        printf '%s\n' "${rows[@]}" | print_tsv_table
+    fi
+}
+
+cmd_workspace_gc() {
+    local filter="" hours=4
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --hours) hours="${2:?}"; shift 2 ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧹 Agent workspace GC (age ≥ ${hours}h, no unmerged work or unsaved edits)"
+    # The reap decision is jj-toolbox's jj-ws-gc; this sums the totals.
+    local reaped=0 kept=0
+    for repo in $targets; do
+        local dir out
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        out=$(cd "$dir" && "$JJ_TOOLBOX/bin/jj-ws-gc" --hours "$hours" 2>&1) || true
+        [ -z "$out" ] && continue
+        while IFS= read -r line; do
+            case "$line" in
+                reaped\ *)
+                    gum style --foreground 46 "  ✓ reaped $repo/${line#reaped }"
+                    ;;
+                "GC done:"*)
+                    local r k
+                    r=$(printf '%s' "$line" | grep -oE '^GC done: [0-9]+' | grep -oE '[0-9]+')
+                    k=$(printf '%s' "$line" | grep -oE '[0-9]+ kept' | grep -oE '[0-9]+')
+                    reaped=$((reaped + r))
+                    kept=$((kept + k))
+                    ;;
+            esac
+        done <<<"$out"
+    done
+    gum style --foreground 46 --margin "1 0" "✅ GC done: $reaped reaped, $kept kept (unmerged work, unsaved edits, or too new)."
+}
+
+# --- abandon-merged ---
+# Fleet-wide fan-out of jj-toolbox's jj-abandon-merged (which holds the proof
+# logic), with a REPO column and totals.
+cmd_abandon_merged() {
+    local filter="" dry=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --dry-run) dry=1; shift ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets title="🧽 Abandoning local copies of merged changes"
+    [ "$dry" -eq 1 ] && title="🧽 Local copies of merged changes (dry run)"
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "$title"
+    local rows=("REPO	REASON	COMMIT	SUBJECT") n=0 repos=0
+    for repo in $targets; do
+        local dir out flag=""
+        dir="$(repo_path "$repo")"
+        [ -d "$dir" ] || continue
+        [ "$dry" -eq 1 ] && flag="--dry-run"
+        # shellcheck disable=SC2086 # $flag is intentionally empty or one flag
+        out=$(cd "$dir" && "$JJ_TOOLBOX/bin/jj-abandon-merged" --tsv $flag 2>/dev/null) || continue
+        [ -z "$out" ] && continue
+        repos=$((repos + 1))
+        while IFS=$'	' read -r why commit subject; do
+            [ -z "$why" ] && continue
+            n=$((n + 1))
+            rows+=("$(printf '%s	%s	%s	%.60s' "$repo" "$why" "$commit" "$subject")")
+        done <<<"$out"
+    done
+    if [ "$n" -eq 0 ]; then
+        gum style --foreground 46 --margin "1 0" "✓ No local copy of a merged change anywhere in scope."
+        return
+    fi
+    printf '%s
+' "${rows[@]}" | column -t -s "$(printf '	')"
+    if [ "$dry" -eq 1 ]; then
+        gum style --foreground 220 --margin "1 0" "Dry run — $n commit(s) in $repos repo(s) would be abandoned. Run without --dry-run to do it."
+    else
+        gum style --foreground 46 --margin "1 0" "✅ Abandoned $n commit(s) in $repos repo(s). Undo per repo: jj op undo"
+    fi
+}
+
+# --- clean ---
+# One table answering "is the fleet clean enough to start new work?". GitHub
+# data (PRs, issues, extra branches) comes from ONE GraphQL request; nothing
+# here fetches, though jj log/diff may snapshot a dirty working copy. Below
+# it, Claude settings files with permission rules (claude-settings-audit.sh);
+# only settings.local.json is info-only. Open issues never count against the
+# verdict.
+CLEAN_ALLOWED_BRANCHES="main production" # long-lived branches that never count as clutter
+
+cmd_clean() {
+    local filter="" local_only=0 strict=0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+        --local) local_only=1; shift ;;
+        --strict) strict=1; shift ;;
+        *) filter="$1"; shift ;;
+        esac
+    done
+    local targets
+    targets=$(resolve_targets "$filter")
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🧼 Fleet clean check"
+
+    declare -A gh_prs gh_issues gh_branches
+    local repo i
+    if [ "$local_only" -eq 0 ]; then
+        local q="" json=""
+        i=0
+        for repo in $targets; do
+            local ghrepo owner reponame
+            ghrepo=$(gh_repo_of "$repo")
+            owner="${ghrepo%%/*}"
+            reponame="${ghrepo#*/}"
+            q+="r$i: repository(owner:\"$owner\", name:\"$reponame\") { pullRequests(states:OPEN){totalCount} issues(states:OPEN){totalCount} refs(refPrefix:\"refs/heads/\", first:100){nodes{name}} } "
+            i=$((i + 1))
+        done
+        json=$(gum spin --spinner dot --title "Querying GitHub..." --show-output -- \
+            gh api graphql -f query="{ $q }" 2>/dev/null) || json=""
+        i=0
+        for repo in $targets; do
+            if [ -n "$json" ]; then
+                gh_prs[$repo]=$(jq -r ".data.r$i.pullRequests.totalCount // \"?\"" <<<"$json")
+                gh_issues[$repo]=$(jq -r ".data.r$i.issues.totalCount // \"?\"" <<<"$json")
+                gh_branches[$repo]=$( (jq -r ".data.r$i.refs.nodes[].name" <<<"$json" || true) \
+                    | grep -vxF -f <(tr ' ' '\n' <<<"$CLEAN_ALLOWED_BRANCHES") | paste -sd, - || true)
+            else
+                gh_prs[$repo]="?"
+                gh_issues[$repo]="?"
+                gh_branches[$repo]="?"
+            fi
+            i=$((i + 1))
+        done
+    fi
+
+    local n_repos=0 n_dirty=0 n_dirtyfiles=0 n_ahead=0 n_conflicts=0 n_ws=0 n_prs=0 n_issues=0 n_branches=0 n_unclean=0
+    local rows=()
+    if [ "$local_only" -eq 1 ]; then
+        rows+=("$(printf 'REPO\tWORKING COPY\tNOT IN MAIN\tCONFLICTS\tJJ WS\tOK')")
+    else
+        rows+=("$(printf 'REPO\tWORKING COPY\tNOT IN MAIN\tCONFLICTS\tJJ WS\tPRs\tISSUES\tEXTRA BRANCHES\tOK')")
+    fi
+    for repo in $targets; do
+        local dir change state ahead_raw ahead=0 files=0 conflicts=0 ws=0 wc ok=1 n
+        dir="$(repo_path "$repo")"
+        n_repos=$((n_repos + 1))
+        if [ ! -d "$dir" ]; then
+            wc="(not cloned)"; ahead="-"; conflicts="-"; ws="-"
+        else
+            IFS=$'\t' read -r change state ahead_raw < <(cd "$dir" && "$JJ_TOOLBOX/bin/jj-ahead" --tsv 2>/dev/null) || ahead_raw="?"
+            : "$change" "$ahead_raw"
+            # Everything not in trunk: this @, other workspaces, orphaned heads.
+            # jj-ahead only sees trunk()..@ of the default workspace.
+            ahead=$(cd "$dir" && jj log -r 'mutable() & ~empty()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
+            files=$(cd "$dir" && jj diff -r @ --summary 2>/dev/null | grep -c . || true)
+            conflicts=$(cd "$dir" && jj log -r 'conflicts() & mutable()' --no-graph -T '"x\n"' 2>/dev/null | grep -c . || true)
+            ws=$(cd "$dir" && jj workspace list -T 'name ++ "\n"' 2>/dev/null | grep -vc '^default$' || true)
+            local plural="s"
+            [ "$files" -eq 1 ] && plural=""
+            if [ "$files" -eq 0 ]; then
+                wc="✓"
+            elif [ "$state" = "UNDESCRIBED" ]; then
+                wc="⚠ $files file$plural, undescribed"
+            else
+                wc="📝 $files file$plural, described"
+            fi
+            [ "$files" -gt 0 ] && { n_dirty=$((n_dirty + 1)); n_dirtyfiles=$((n_dirtyfiles + files)); ok=0; }
+            [ "$ahead" -gt 0 ] && { n_ahead=$((n_ahead + ahead)); ok=0; }
+            [ "$conflicts" -gt 0 ] && { n_conflicts=$((n_conflicts + conflicts)); ok=0; }
+            [ "$ws" -gt 0 ] && { n_ws=$((n_ws + ws)); ok=0; }
+            [ "$ahead" -eq 0 ] && ahead="-"
+            [ "$conflicts" -eq 0 ] && conflicts="-"
+            [ "$ws" -eq 0 ] && ws="-"
+        fi
+        local prs issues branches
+        if [ "$local_only" -eq 0 ]; then
+            prs="${gh_prs[$repo]}"; issues="${gh_issues[$repo]}"; branches="${gh_branches[$repo]}"
+            case "$prs" in ''|'?'|0) : ;; *) n_prs=$((n_prs + prs)); ok=0 ;; esac
+            case "$issues" in ''|'?'|0) : ;; *) n_issues=$((n_issues + issues)) ;; esac
+            if [ -n "$branches" ] && [ "$branches" != "?" ]; then
+                n_branches=$((n_branches + $(tr ',' '\n' <<<"$branches" | grep -c .)))
+                ok=0
+            fi
+            [ "$prs" = "0" ] && prs="-"
+            [ "$issues" = "0" ] && issues="-"
+            [ -z "$branches" ] && branches="-"
+        fi
+        [ "$ok" -eq 0 ] && n_unclean=$((n_unclean + 1))
+        local mark="✅"
+        [ "$ok" -eq 0 ] && mark="⚠"
+        if [ "$local_only" -eq 1 ]; then
+            rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s' "$repo" "$wc" "$ahead" "$conflicts" "$ws" "$mark")")
+        else
+            rows+=("$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' "$repo" "$wc" "$ahead" "$conflicts" "$ws" "$prs" "$issues" "$branches" "$mark")")
+        fi
+    done
+    printf '%s\n' "${rows[@]}" | column -t -s "$(printf '\t')"
+
+    local claude_rows="" n_claude=0 n_claude_attn=0 claude_incomplete=0
+    # A failed scan (unreadable dir, missing script) must not read as clean.
+    local claude_roots=("$ROOT")
+    [ -d "$ROOT/../kleinbem-dev" ] && claude_roots+=("$ROOT/../kleinbem-dev")
+    claude_rows=$(bash "$ROOT/kleinbem/tools/claude-settings-audit.sh" "${claude_roots[@]}" 2>/dev/null) || claude_incomplete=1
+    if [ -n "$filter" ] && [ -n "$claude_rows" ]; then
+        # Keep rows under a targeted repo or its workspaces (checking both repo keys and resolved dirnames).
+        local target_patterns="$targets"
+        for t in $targets; do
+            local rdir
+            rdir=$(basename "$(repo_path "$t")")
+            [ "$rdir" != "$t" ] && target_patterns+=" $rdir"
+        done
+        claude_rows=$(awk -F'\t' -v t="$target_patterns" 'BEGIN { n = split(t, r, /[[:space:]]+/) }
+            { for (i = 1; i <= n; i++) if (r[i] != "" && (index($3, r[i] "/") == 1 || index($3, r[i] ".ws/") == 1)) { print; next } }' <<<"$claude_rows")
+    fi
+    if [ -n "$claude_rows" ]; then
+        n_claude=$(grep -c . <<<"$claude_rows" || true)
+        n_claude_attn=$(awk -F'\t' '$1 != "local"' <<<"$claude_rows" | grep -c . || true)
+        echo
+        gum style --foreground 212 "Claude Code permission rules outside the managed policy"
+        { printf 'KIND\tRULES\tFILE\n'; printf '%s\n' "$claude_rows"; } | column -t -s "$(printf '\t')"
+    fi
+
+    echo
+    local summary="repos: $n_repos · dirty working copies: $n_dirty ($n_dirtyfiles files) · commits not in main: $n_ahead · conflicts: $n_conflicts · jj workspaces: $n_ws"
+    [ "$local_only" -eq 0 ] && summary+=" · open PRs: $n_prs · extra branches: $n_branches · open issues: $n_issues (info only)"
+    summary+=" · claude rule files: $n_claude ($n_claude_attn to move)"
+    [ "$claude_incomplete" -eq 1 ] && summary+=" · claude scan INCOMPLETE"
+    gum style --foreground 245 "$summary"
+    if [ "$n_unclean" -eq 0 ] && [ "$n_claude_attn" -eq 0 ] && [ "$claude_incomplete" -eq 0 ]; then
+        gum style --foreground 46 "✅ ALL CLEAN — safe to start new work."
+    else
+        [ "$n_unclean" -gt 0 ] && gum style --foreground 214 "⚠ $n_unclean of $n_repos repos need attention before starting new work."
+        [ "$n_claude_attn" -gt 0 ] && gum style --foreground 214 "⚠ $n_claude_attn Claude settings file(s) hold rules outside the managed policy."
+        [ "$claude_incomplete" -eq 1 ] && gum style --foreground 214 "⚠ The Claude settings scan failed or was partial (unreadable directory?); its list may be incomplete."
+        gum style --foreground 245 "   dirty → just save-all / diff-all · not in main → just abandon-merged (proven copies) then push-all · workspaces → just jj::ws-list / ws-gc · PRs/branches → gh pr list / just sweep-merged · claude rules → nix-config modules/nixos/files/claude-code-policy.json, then delete the file (workspace copies go with ws-gc or a rebase onto main)"
+        [ "$strict" -eq 1 ] && return 1
+    fi
+    return 0
+}
+
+# --- dispatch ---
+subcommand="${1:-}"
+[ -n "$subcommand" ] || { echo "Usage: jj-fleet <subcommand> [args...]" >&2; exit 1; }
+shift
+case "$subcommand" in
+repo-path)
+    [ $# -gt 0 ] && [ -n "${1:-}" ] || { echo "Usage: jj-fleet repo-path <repo>" >&2; exit 1; }
+    repo_path "$1"
+    ;;
+status-all) cmd_status_all "$@" ;;
+clean) cmd_clean "$@" ;;
+abandon-merged) cmd_abandon_merged "$@" ;;
+remote-status) cmd_remote_status "$@" ;;
+remote-prs) cmd_remote_prs "$@" ;;
+remote-ci) cmd_remote_ci "$@" ;;
+diff-all) cmd_diff_all "$@" ;;
+check-signatures) cmd_check_signatures "$@" ;;
+bootstrap) cmd_bootstrap "$@" ;;
+sync-agent-links) cmd_sync_agent_links "$@" ;;
+init-bookmarks) cmd_init_bookmarks "$@" ;;
+pull-all) cmd_pull_all "$@" ;;
+save-all) cmd_save_all "$@" ;;
+save) cmd_save "$@" ;;
+sign-unsigned) cmd_sign_unsigned "$@" ;;
+push-all) cmd_push_all "$@" ;;
+sync) cmd_sync "$@" ;;
+branch-all) cmd_branch_all "$@" ;;
+sweep-merged) cmd_sweep_merged "$@" ;;
+workspace-new) cmd_workspace_new "$@" ;;
+workspace-list) cmd_workspace_list "$@" ;;
+workspace-gc) cmd_workspace_gc "$@" ;;
+*)
+    echo "Unknown subcommand: $subcommand" >&2
+    echo "Available: status-all clean abandon-merged diff-all remote-status remote-prs remote-ci check-signatures bootstrap init-bookmarks pull-all save-all save sign-unsigned push-all sync branch-all sweep-merged workspace-new workspace-list workspace-gc" >&2
+    exit 1
+    ;;
+esac

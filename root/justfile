@@ -1,0 +1,121 @@
+# Workspace-root justfile. The root is not a repo; this file is reached through
+# a symlink (created by `just bootstrap`), so the fleet recipes work here without
+# `cd kleinbem`. common.just sees kleinbem/repos.nix below and sets ROOT to here.
+import 'kleinbem/.just/common.just'
+
+# --- Modules ---
+
+# Fleet jj recipes: ws-new/ws-list/ws-gc, push-all, ...
+mod jj 'kleinbem/.just/jj.just'
+
+[group("Main")]
+default:
+    @just jj::hub
+
+[group("Main")]
+status-all filter="":
+    @just jj::status-all {{filter}}
+
+[group("Main")]
+clean *args="":
+    @just jj::clean {{args}}
+
+[group("Main")]
+abandon-merged *args="":
+    @just jj::abandon-merged {{args}}
+
+[group("Main")]
+diff-all filter="" *args="":
+    @just jj::diff-all {{filter}} {{args}}
+
+[group("Main")]
+remote-status filter="":
+    @just jj::remote-status {{filter}}
+
+[group("Main")]
+remote-prs filter="":
+    @just jj::remote-prs {{filter}}
+
+[group("Main")]
+remote-ci limit="5" filter="":
+    @just jj::remote-ci {{limit}} {{filter}}
+
+[group("Main")]
+check-signatures filter="":
+    @just jj::check-signatures {{filter}}
+
+[group("Main")]
+save-all message="" filter="":
+    @just jj::save-all "{{message}}" {{filter}}
+
+[group("Main")]
+ship-all message="" filter="":
+    @just jj::ship-all "{{message}}" {{filter}}
+
+alias ship := ship-all
+
+[group("Main")]
+pull-all filter="":
+    @just jj::pull-all {{filter}}
+
+[group("Main")]
+push-all filter="":
+    @just jj::push-all {{filter}}
+
+[group("Main")]
+sign-unsigned filter="":
+    @just jj::sign-unsigned {{filter}}
+
+[group("Main")]
+bootstrap filter="":
+    @just jj::bootstrap {{filter}}
+
+[group("Main")]
+sync-agent-links filter="":
+    @just jj::sync-agent-links {{filter}}
+
+[positional-arguments]
+[group("Main")]
+agent repo name="" runner="claude" *args:
+    @just jj::agent "$@"
+
+[group("Main")]
+init-bookmarks filter="":
+    @just jj::init-bookmarks {{filter}}
+
+# Usage:
+#   just in nix-config nixos::switch
+#   just in openwrt-config check core-gateway
+# Pass-through to any repo's own justfile (locates in $ROOT or sibling orgs)
+[group("Main")]
+in repo *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{ROOT}}"
+    repo="{{repo}}"
+    dir="$(ROOT="$root" bash "$root/kleinbem/tools/jj-fleet.sh" repo-path "$repo")"
+    cd "$dir"
+    exec just {{args}}
+
+[group("Maintenance")]
+audit-versions filter="":
+    @bash "{{ROOT}}/kleinbem/tools/audit-versions.sh" "{{ROOT}}" "{{filter}}"
+
+[group("Maintenance")]
+check-flake-lock-age:
+    @bash "{{ROOT}}/kleinbem/tools/check-flake-lock-age.sh" "{{ROOT}}"
+
+[group("Maintenance")]
+audit-transitive-deps filter="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔗 Scanning transitive dependencies for major version changes..."
+    echo ""
+    for repo in {{ROOT}}/nix-*/; do
+        repo_name=$(basename "$repo")
+        if echo "$repo_name" | grep -q "{{filter}}"; then
+            {{ROOT}}/kleinbem/tools/audit-transitive-deps.sh "$repo" || true
+            echo ""
+        fi
+    done
+    echo "✓ Transitive dependency audit complete"

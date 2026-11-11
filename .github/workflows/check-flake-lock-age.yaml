@@ -1,0 +1,84 @@
+name: Check Flake Lock Freshness
+
+# Weekly check of each public repo's locked nixpkgs (flake.lock lastModified).
+# Locks over 30 days old go into one issue, posted only when the list changes.
+
+on:
+  schedule:
+    - cron: '0 9 * * 3' # Wednesday 09:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-flake-lock-age
+  cancel-in-progress: false
+
+# An explicit bash shell runs with pipefail, so `| tee` can't hide a failure.
+defaults:
+  run:
+    shell: bash
+
+env:
+  ISSUE_TITLE: "Audit: flake lock age"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Clone the public fleet repos
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/fetch-public-repos.sh repos.nix .repos
+
+      - name: Check lock age
+        run: |
+          # Exit 1 means stale locks; anything higher is an error.
+          rc=0
+          tools/check-flake-lock-age.sh .repos | tee flake-lock-age.log || rc=$?
+          if ((rc > 1)); then
+            echo "::error::check-flake-lock-age.sh failed (exit $rc)"
+            exit 1
+          fi
+          {
+            echo '```'
+            cat flake-lock-age.log
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+          # Dates, not day counts, so the issue only changes when a lock does.
+          stale="$(sed -nE 's/^⚠️ +([^:]+): [0-9]+ days old \((.*)\)$/- \1: nixpkgs locked \2/p' flake-lock-age.log)"
+          if ((rc == 1)) && [[ -z "$stale" ]]; then
+            echo "::error::the check reported stale locks, but none matched the report pattern"
+            exit 1
+          fi
+          if [[ -n "$stale" ]]; then
+            {
+              echo "flake.lock files whose nixpkgs is over 30 days old. Refresh with \`cd <repo> && nix flake update\`."
+              echo
+              echo "$stale"
+            } >report.md
+            echo "findings=1" >>"$GITHUB_ENV"
+          else
+            echo "No flake.lock is over 30 days old." >report.md
+            echo "findings=0" >>"$GITHUB_ENV"
+          fi
+
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/report-issue.sh "$ISSUE_TITLE" report.md "$findings"
+
+      - name: Archive results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: flake-lock-age-${{ github.run_id }}
+          path: flake-lock-age.log
+          retention-days: 90
