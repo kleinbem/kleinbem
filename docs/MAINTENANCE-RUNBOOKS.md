@@ -250,8 +250,9 @@ just remote-ci 10  # See recent runs
 ### Step 3: Reproduce Locally
 
 ```bash
-# If possible, reproduce the exact failure locally
-cd nix-config
+# If possible, reproduce the exact failure locally, in your own nix-config workspace
+cd ~/Develop/github.com/kleinbem/nix && just jj::ws-new nix-config <name>
+cd ~/Develop/github.com/kleinbem/nix-config.ws/<name>
 nix flake check --show-trace  # More verbose error
 
 # aarch64 host (e.g. orin-nano): the configuration sets its own platform; on x86_64 an
