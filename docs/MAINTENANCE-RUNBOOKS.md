@@ -60,12 +60,18 @@ nix-presets/nixosModules/android-emulator.nix:  platformToolsVersion = "37.0.1";
 
 ### Step 5: Test & Commit
 
-```bash
-cd nix-devshells && nix flake check  # Verify build succeeds
-cd ../nix-presets && nix flake check
+Each repo gets its own change and PR, made in a jj workspace (`just jj::ws-new <repo> <name>`):
 
-# Commit both repos
-git commit -m "fix: update Android platform-tools to 37.0.1"
+```bash
+cd ~/Develop/github.com/kleinbem/nix-devshells.ws/<name>
+nix flake check
+jj describe -m "fix: update Android platform-tools to 37.0.1"
+# push + PR, see the jj-workflow skill
+
+cd ~/Develop/github.com/kleinbem/nix-presets.ws/<name>
+nix flake check
+jj describe -m "fix: update Android platform-tools to 37.0.1"
+# push + PR
 ```
 
 ### Prevention for Next Time
@@ -144,9 +150,9 @@ lib.optionals (pkgs.stdenv.hostPlatform.system != "aarch64-linux") [
   waypipe
 ]
 
-# Test the affected platform
-nix eval '.#nixosConfigurations.orin-nano.config.environment.systemPackages' | grep waypipe
-# Should be empty (waypipe excluded on aarch64)
+# Test the affected platform (from nix-config/); prints false when waypipe is excluded
+nix eval '.#nixosConfigurations.orin-nano.config.environment.systemPackages' \
+  --apply 'ps: builtins.any (p: (p.pname or "") == "waypipe") ps'
 ```
 
 ---
@@ -177,10 +183,10 @@ cp flake.lock flake.lock.backup
 ```bash
 nix flake update  # Fetch latest from all inputs
 
-# Quick sanity check
-nix flake check --override-input nix-devshells github:kleinbem/nix-devshells
+# Quick sanity check against the inputs the new lock pins
+nix flake check
 # or for nixos configs:
-nix eval '.#nixosConfigurations.mac-mini'
+nix eval '.#nixosConfigurations.mac-mini.config.system.build.toplevel.drvPath'
 
 # If error, revert:
 cp flake.lock.backup flake.lock
@@ -189,10 +195,10 @@ cp flake.lock.backup flake.lock
 ### Step 4: Review & Commit
 
 ```bash
-git diff flake.lock  # Review what changed
+jj diff flake.lock  # Review what changed
 
-# Commit with context
-git commit -m "chore: update flake.lock ($(date +%Y-%m-%d))
+# Describe with context (jj tracks flake.lock without staging), then push + PR
+jj describe -m "chore: update flake.lock ($(date +%Y-%m-%d))
 
 Updated inputs: nixpkgs, home-manager, ...
 No breaking changes detected.
@@ -249,7 +255,7 @@ cd nix-config
 nix flake check --show-trace  # More verbose error
 
 # If cross-platform (e.g., aarch64 build on x86_64):
-nix build '.#nixosConfigurations.orin-nano' --system aarch64-linux
+nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel' --system aarch64-linux
 ```
 
 ### Step 4: Fix & Verify
@@ -259,9 +265,8 @@ nix build '.#nixosConfigurations.orin-nano' --system aarch64-linux
 # Run the same check that failed:
 nix flake check
 
-# If it passed, commit and push
-git commit -m "fix: <issue>"
-# Wait for YubiKey, then: git push origin main
+# If it passed, describe, push the bookmark and open a PR (main only takes PRs)
+jj describe -m "fix: <issue>"
 ```
 
 ---
