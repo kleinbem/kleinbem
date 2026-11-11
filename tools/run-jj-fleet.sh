@@ -32,7 +32,8 @@ if [ -O "$CACHE_DIR" ] && [ -z "$(find "$CACHE_DIR" -maxdepth 0 -perm /022)" ]; 
 fi
 
 use_cache=0
-if [ "$cache_ok" -eq 1 ] && [ -f "$CACHE_FILE" ] && [ -O "$CACHE_FILE" ]; then
+if [ "$cache_ok" -eq 1 ] && [ -f "$CACHE_FILE" ] && [ -O "$CACHE_FILE" ] \
+    && [ -z "$(find "$CACHE_FILE" -maxdepth 0 -perm /022)" ]; then
     cached_path=$(cat "$CACHE_FILE")
     if [[ "$cached_path" =~ ^/nix/store/[a-z0-9]{32}-[^/]+$ ]] \
         && [ -x "$cached_path/bin/jj-fleet" ] \
@@ -46,8 +47,11 @@ if [ "$use_cache" -eq 1 ]; then
     binary="$cached_path/bin/jj-fleet"
 else
     store_path=$(nix build "$ROOT/kleinbem#jj-fleet" --no-link --print-out-paths)
+    # Best effort: a fresh 0600 file renamed into place; a failed write must not block the run.
     if [ "$cache_ok" -eq 1 ]; then
-        echo "$store_path" >"$CACHE_FILE"
+        { tmp=$(mktemp "$CACHE_DIR/.jj-fleet-store-path.XXXXXX") \
+            && echo "$store_path" >"$tmp" && mv -f "$tmp" "$CACHE_FILE"; } 2>/dev/null \
+            || rm -f "${tmp:-}"
     fi
     binary="$store_path/bin/jj-fleet"
 fi
