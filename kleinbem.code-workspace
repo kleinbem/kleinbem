@@ -9,8 +9,8 @@
 "path": "../nix-config"
 },
 {
-"name": "Nix Secrets",
-"path": "../nix-secrets"
+"name": "Secrets",
+"path": "../kleinbem-secrets"
 },
 {
 "name": "OpenWrt Builder",
@@ -19,10 +19,6 @@
 {
 "name": "OpenWrt Config",
 "path": "../openwrt-config"
-},
-{
-"name": "OpenWrt Secrets",
-"path": "../openwrt-secrets"
 }
 ],
 "settings": {

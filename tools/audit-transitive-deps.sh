@@ -4,6 +4,7 @@
 # that could break dependent packages.
 #
 # Usage: audit-transitive-deps.sh [repo-path] [old-lock-file]
+# Exit: 0 clean, 1 major bump found, 2 no package version could be evaluated.
 
 set -euo pipefail
 
@@ -72,15 +73,17 @@ audit_transitive_deps() {
   echo "   nixpkgs rev: $current_rev"
   echo ""
 
-  local has_changes=0
+  local has_changes=0 evaluated=0
 
   for pkg in "${WATCH_PACKAGES[@]}"; do
     local current_version
     current_version=$(get_package_version "$pkg" "$current_rev" || echo "")
 
     if [ -z "$current_version" ] || [ "$current_version" = "unknown" ]; then
+      echo "⚠️  $pkg: could not evaluate version at $current_rev, skipped" >&2
       continue
     fi
+    evaluated=$((evaluated + 1))
 
     local current_major
     current_major=$(get_major_version "$current_version")
@@ -90,11 +93,15 @@ audit_transitive_deps() {
       local old_rev
       old_rev=$(get_nixpkgs_rev "$OLD_LOCK" || echo "")
 
-      if [ -n "$old_rev" ] && [ "$old_rev" != "$current_rev" ]; then
+      if [ -z "$old_rev" ]; then
+        echo "⚠️  could not read the nixpkgs revision from $OLD_LOCK, $pkg not compared" >&2
+      elif [ "$old_rev" != "$current_rev" ]; then
         local old_version
         old_version=$(get_package_version "$pkg" "$old_rev" || echo "")
 
-        if [ -n "$old_version" ] && [ "$old_version" != "unknown" ]; then
+        if [ -z "$old_version" ] || [ "$old_version" = "unknown" ]; then
+          echo "⚠️  $pkg: could not evaluate version at $old_rev, not compared" >&2
+        else
           local old_major
           old_major=$(get_major_version "$old_version")
 
@@ -110,6 +117,11 @@ audit_transitive_deps() {
       echo "  $pkg: $current_version"
     fi
   done
+
+  if [ "$evaluated" -eq 0 ]; then
+    echo "❌ No watched package version could be evaluated; the audit did not run" >&2
+    return 2
+  fi
 
   if [ $has_changes -eq 1 ]; then
     echo ""

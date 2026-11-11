@@ -25,9 +25,6 @@ find_root() {
 
 ROOT="${ROOT:-$(find_root)}"
 
-ALL_REPOS=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
-    --apply 'rs: builtins.concatStringsSep " " (builtins.attrNames rs)' 2>/dev/null || true)
-
 # "name url" per repo, so gh_repo_of needs no nix eval per call.
 # shellcheck disable=SC2016 # ${n} is Nix interpolation, not shell
 ALL_REPO_URLS="$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" \
@@ -36,6 +33,12 @@ if [ -z "$ALL_REPO_URLS" ] && [ -f "$ROOT/kleinbem/repos.nix" ]; then
     ALL_REPO_URLS=$(sed -nE 's/^[[:space:]]*"?([a-zA-Z0-9_.-]+)"?[[:space:]]*=[[:space:]]*"([^"]+)".*/\1 \2/p' "$ROOT/kleinbem/repos.nix")
 fi
 export ALL_REPO_URLS
+ALL_REPOS=$(awk '{print $1}' <<<"$ALL_REPO_URLS" | tr '\n' ' ')
+# An empty list would make every fan-out (and `clean`) report success on nothing.
+if [ -z "${ALL_REPOS// /}" ]; then
+    echo "jj-fleet: no repos read from $ROOT/kleinbem/repos.nix" >&2
+    exit 1
+fi
 
 # GitHub "owner/name" from the repo's URL in repos.nix; repos live under both
 # kleinbem and kleinbem-dev. Exported for the `bash -c` children below.
@@ -271,20 +274,32 @@ cmd_bootstrap() {
     local filter="${1:-}" targets
     targets=$(resolve_targets "$filter")
     gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🌱 Bootstrapping workspace from kleinbem/repos.nix"
+    local failed=0
     for repo in $targets; do
-        local rpath
+        local rpath url name u
         rpath="$(repo_path "$repo")"
-        if [ -d "$rpath" ]; then
+        if [ -d "$rpath/.jj" ]; then
             gum style --foreground 46 "  ✓ $repo (already cloned)"
-        else
-            mkdir -p "$(dirname "$rpath")"
-            local url
-            url=$(nix eval --raw --file "$ROOT/kleinbem/repos.nix" --apply "rs: rs.\"$repo\"")
-            gum spin --spinner dot --title "cloning $repo..." -- bash -c "
-                git clone '$url' '$rpath' >/dev/null 2>&1
-                cd '$rpath' && jj git init --colocate >/dev/null 2>&1 && jj bookmark track main --remote=origin >/dev/null 2>&1
-            "
+            continue
+        fi
+        url=""
+        while read -r name u; do
+            [ "$name" = "$repo" ] && { url="$u"; break; }
+        done <<<"$ALL_REPO_URLS"
+        mkdir -p "$(dirname "$rpath")"
+        # A clone left without .jj by an earlier failed run only gets the jj setup redone.
+        # shellcheck disable=SC2016 # $1/$2 expand in the child shell
+        if gum spin --show-error --spinner dot --title "cloning $repo..." -- bash -c '
+            set -e
+            [ -d "$2" ] || git clone -q "$1" "$2"
+            cd "$2"
+            jj git init --colocate
+            jj bookmark track main --remote=origin
+        ' _ "$url" "$rpath"; then
             gum style --foreground 46 "  ✓ $repo cloned + jj-initialised"
+        else
+            gum style --foreground 196 "  ✗ $repo: clone or jj setup failed (see above)"
+            failed=1
         fi
     done
     # Root files (CLAUDE.md, justfile, .envrc) are symlinks into kleinbem/root/.
@@ -293,6 +308,10 @@ cmd_bootstrap() {
     bash "$ROOT/kleinbem/tools/link-root-files.sh" "$ROOT" || true
     gum style --foreground 212 "🔗 Repo agent links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
     bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter" || true
+    if [ "$failed" -ne 0 ]; then
+        gum style --foreground 196 --margin "1 0" "❌ Some repos failed to bootstrap; rerun to retry them."
+        return 1
+    fi
     gum style --foreground 46 --margin "1 0" "✅ Workspace bootstrapped."
 }
 

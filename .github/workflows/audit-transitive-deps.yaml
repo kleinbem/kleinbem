@@ -58,10 +58,14 @@ jobs:
                 old_lock="$repo_dir/old-flake.lock"
               fi
             fi
-            audit_failed=0
-            ./tools/audit-transitive-deps.sh "$repo_dir" ${old_lock:+"$old_lock"} 2>&1 | tee "audit-${{ matrix.repo }}.log" || audit_failed=1
-            if [ "$audit_failed" = "1" ]; then
+            rc=0
+            ./tools/audit-transitive-deps.sh "$repo_dir" ${old_lock:+"$old_lock"} 2>&1 | tee "audit-${{ matrix.repo }}.log" || rc=$?
+            # 1 = major bump found; anything else means the audit itself failed.
+            if [ "$rc" = "1" ]; then
               echo "has_breaking_changes=true" >> "$GITHUB_OUTPUT"
+            elif [ "$rc" != "0" ]; then
+              echo "::error::audit-transitive-deps failed for ${{ matrix.repo }} (exit $rc)"
+              exit "$rc"
             fi
           else
             echo "✓ ${{ matrix.repo }} has no flake.lock, skipping"
@@ -74,7 +78,7 @@ jobs:
           script: |
             const fs = require('fs');
             const log = fs.readFileSync('audit-${{ matrix.repo }}.log', 'utf8');
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,

@@ -21,8 +21,8 @@ declare -A versions
 drift_found=0
 
 while IFS=: read -r file assignment; do
-  # Extract package name (before "Version")
-  package=$(echo "$assignment" | sed -E 's/.*([a-zA-Z]+)Version.*/\1/')
+  # Full attribute name, e.g. platformToolsVersion; empty when the line isn't an assignment.
+  package=$(echo "$assignment" | sed -nE 's/.*\b([A-Za-z_][A-Za-z0-9_]*Version)[[:space:]]*=.*/\1/p')
   # Extract version (between quotes)
   version=$(echo "$assignment" | sed -E 's/.*"([^"]+)".*/\1/')
 
