@@ -23,11 +23,11 @@ abandon-merged *args="":
 
 [group("Main")]
 save-all message="" filter="":
-    @just jj::save-all "{{message}}" {{filter}}
+    @just jj::save-all {{quote(message)}} {{filter}}
 
 [group("Main")]
 ship-all message="" filter="":
-    @just jj::ship-all "{{message}}" {{filter}}
+    @just jj::ship-all {{quote(message)}} {{filter}}
 
 alias ship := ship-all
 
@@ -66,7 +66,13 @@ agent repo name="" runner="claude" *args:
 #   just in openwrt-config check core-gateway
 [group("Main")]
 in repo *args:
-    @cd {{ROOT}}/{{repo}} && just {{args}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # repo-path also finds repos under sibling orgs (kleinbem-dev/<repo>).
+    dir="$(ROOT="{{ROOT}}" bash "{{ROOT}}/kleinbem/tools/jj-fleet.sh" repo-path "{{repo}}")"
+    [ -d "$dir" ] || { echo "in: $dir does not exist; run 'just bootstrap {{repo}}'" >&2; exit 1; }
+    cd "$dir"
+    exec just {{args}}
 
 # Unit tests for the shared tooling in tools/; fast, touches no real repo.
 [group("Main")]

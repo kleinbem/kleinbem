@@ -139,12 +139,12 @@ pull-all filter="":
 # Describe dirty changes across the scope; prompts for the message if not given.
 [group("Sync")]
 save-all message="" filter="":
-    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save-all "{{message}}" {{filter}}
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save-all {{quote(message)}} {{filter}}
 
 # Describe one repo only, for when other repos hold someone else's in-flight work.
 [group("Sync")]
 save repo message:
-    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save {{repo}} "{{message}}"
+    @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh save {{repo}} {{quote(message)}}
 
 # Prompts for the message if not given; KLEINBEM_PERSONA works as with save-all.
 
@@ -153,7 +153,7 @@ save repo message:
 ship-all message="" filter="":
     #!/usr/bin/env bash
     set -e
-    msg="{{message}}"
+    msg={{quote(message)}}
     if [ -z "$msg" ]; then
         msg=$(gum input --header "Ship: commit message" --placeholder "feat(...): ...")
     fi

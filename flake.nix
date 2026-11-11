@@ -24,6 +24,9 @@
         # script never depends on whatever happens to be on PATH from
         # whichever devshell is loaded (or isn't).
         runtimeInputs = [
+          pkgs.bash
+          pkgs.gnugrep
+          pkgs.gnused
           pkgs.jujutsu
           pkgs.git
           pkgs.nix

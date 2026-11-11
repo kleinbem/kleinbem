@@ -46,11 +46,11 @@ check-signatures filter="":
 
 [group("Main")]
 save-all message="" filter="":
-    @just jj::save-all "{{message}}" {{filter}}
+    @just jj::save-all {{quote(message)}} {{filter}}
 
 [group("Main")]
 ship-all message="" filter="":
-    @just jj::ship-all "{{message}}" {{filter}}
+    @just jj::ship-all {{quote(message)}} {{filter}}
 
 alias ship := ship-all
 
