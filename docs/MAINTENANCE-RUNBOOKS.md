@@ -268,10 +268,17 @@ nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel'
 # Run the same check that failed:
 nix flake check
 
-# If it passed, describe and push. A fix for main gets its own PR (main only takes PRs);
-# a fix for a failed PR goes onto that PR's branch:
-#   jj bookmark track <branch>@origin && jj bookmark set <branch> -r @ && jj git push -b <branch>
+# If it passed, describe first, then push
 jj describe -m "fix: <issue>"
+
+# A fix for a failed PR goes onto that PR's branch:
+jj bookmark track <branch>@origin
+jj bookmark set <branch> -r @
+jj git push -b <branch>
+
+# A fix for main gets its own bookmark and PR (main only takes PRs):
+jj bookmark create <new-branch> -r @
+jj git push -b <new-branch> --allow-new
 ```
 
 ---
