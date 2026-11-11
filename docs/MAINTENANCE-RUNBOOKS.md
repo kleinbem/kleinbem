@@ -268,7 +268,8 @@ nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel'
 # Run the same check that failed:
 nix flake check
 
-# If it passed, describe, push the bookmark and open a PR (main only takes PRs)
+# If it passed, describe and push. A fix for main gets its own PR (main only takes PRs);
+# a fix for a failed PR goes onto that PR's branch (jj bookmark set <branch> -r @).
 jj describe -m "fix: <issue>"
 ```
 
