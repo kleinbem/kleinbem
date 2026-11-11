@@ -45,16 +45,24 @@ just check-flake-lock-age
 
 **Triggers:**
 - Manual: `just audit-transitive-deps [filter]`
-- On flake.lock PR changes (CI comments immediately)
+- On PRs in this repo (`kleinbem`) that change a `flake.lock`: CI comments on breaking changes. PRs in nix-config, nix-devshells and the other audited repos don't trigger it; their locks are only covered by the weekly run (which compares each repo's last commit with the one before)
 - Weekly: GitHub Actions (Thursday 10:00 UTC)
 
 **Watches:** FFmpeg, OpenSSL, curl, zlib, libpng, libjpeg, lua, Python3, PostgreSQL, libxml2
 
-**Example:**
+**Example:** the `just` recipe passes no old lock, so it lists the current versions:
 ```bash
 just audit-transitive-deps nix-config
-# 🔗 Auditing transitive dependencies for: nix-config
+# 📦 Auditing transitive dependencies for: nix-config
 #    nixpkgs rev: f6e5b...
+#   ffmpeg: 9.0.0
+#   openssl: 3.6.0
+```
+
+To compare against an older lock, call the script with it; CI passes the lock from `HEAD~1`:
+```bash
+git -C nix-config show HEAD~1:flake.lock > /tmp/old-flake.lock
+kleinbem/tools/audit-transitive-deps.sh nix-config /tmp/old-flake.lock
 # ⚠️  ffmpeg: major version bump (8 → 9)
 #    old: 8.1.1, new: 9.0.0
 ```
@@ -75,21 +83,19 @@ The version and lock-age audits shallow-clone the public repos in `repos.nix` (`
 
 ---
 
-## Pre-commit Hook: Version Consistency
+## Version Consistency Check (not wired up yet)
 
-Prevents version drift before commits:
+`tools/check-version-consistency.sh` flags the same `*Version` attribute pinned to different
+values across `.nix` files under the directory it runs in. No pre-commit hook runs it yet;
+[CI-HARDENING-RECOMMENDATIONS.md](CI-HARDENING-RECOMMENDATIONS.md) has the proposed hook.
 
 ```bash
-git add platformToolsVersion-change1.nix platformToolsVersion-change2.nix
-git commit -m "..."
-
-# ⚠️  Version consistency check: Found multiple versions of same key
-# platformToolsVersion=36.0.1
-# platformToolsVersion=37.0.1
-# (commit fails)
+cd ~/Develop/github.com/kleinbem && kleinbem/tools/check-version-consistency.sh
+# ❌ Version pinning drift detected:
+#   Package: platformToolsVersion
+#     Pinned to 36.0.1 in: (earlier occurrence)
+#     Pinned to 37.0.1 in: ./nix-presets/...
 ```
-
-Configured in `nix-devshells/shells/default/default.nix`.
 
 ---
 
@@ -103,7 +109,7 @@ Configured in `nix-devshells/shells/default/default.nix`.
 | 2026-08-17 | GitHub Actions workflows (audit-versions.yaml) | ✅ Implemented |
 | 2026-08-17 | GitHub Actions workflows (check-flake-lock-age.yaml) | ✅ Implemented |
 | 2026-08-17 | GitHub Actions workflows (audit-transitive-deps.yaml) | ✅ Implemented |
-| 2026-08-17 | Pre-commit hook (version-consistency) | ✅ Implemented |
+| 2026-08-17 | Version consistency script (`tools/check-version-consistency.sh`) | ✅ Implemented; pre-commit hook not wired up |
 
 ---
 
@@ -128,12 +134,15 @@ Auto-flag packages with known CVEs in nixpkgs.
 ### "device not found" when pushing
 YubiKey SSH signing issue. Plug in the key and try again: `jj git push`
 
-### Audit returns "unknown" versions
-The package doesn't exist in that nixpkgs revision (or is conditional). This is safe to ignore.
+### Audit skips a package ("could not evaluate version")
+The script prints this on stderr for every `nix eval` that failed. That can be a package missing
+from that nixpkgs revision, but also a fetch, rate-limit or evaluation error that hides a version
+change. Rerun `nix eval --raw github:nixos/nixpkgs/<rev>#<pkg>.version` to see which. When no
+package evaluates at all, the script exits 2 and the workflow fails.
 
 ### Workflow artifacts are empty
 Check the workflow run logs — the script may have failed on package evaluation. This usually means a package was removed or renamed in nixpkgs.
 
 ---
 
-See also: [CI-HARDENING-RECOMMENDATIONS.md](../CI-HARDENING-RECOMMENDATIONS.md)
+See also: [CI-HARDENING-RECOMMENDATIONS.md](CI-HARDENING-RECOMMENDATIONS.md)

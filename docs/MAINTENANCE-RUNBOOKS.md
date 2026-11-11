@@ -52,8 +52,13 @@ grep -r "platformToolsVersion.*36" nix-* --include="*.nix"
 
 ### Step 4: Update All Locations
 
+Each repo gets its own jj workspace and PR. Create the workspaces first and edit there, not in
+the primary checkouts:
+
 ```bash
-# Must update EVERY location consistently
+cd ~/Develop/github.com/kleinbem/nix && just jj::ws-new nix-devshells <name> && just jj::ws-new nix-presets <name>
+
+# Must update EVERY location consistently (in nix-devshells.ws/<name> and nix-presets.ws/<name>)
 nix-devshells/shells/android.nix:        platformToolsVersion = "37.0.1";
 nix-presets/nixosModules/android-emulator.nix:  platformToolsVersion = "37.0.1";
 ```
@@ -61,11 +66,15 @@ nix-presets/nixosModules/android-emulator.nix:  platformToolsVersion = "37.0.1";
 ### Step 5: Test & Commit
 
 ```bash
-cd nix-devshells && nix flake check  # Verify build succeeds
-cd ../nix-presets && nix flake check
+cd ~/Develop/github.com/kleinbem/nix-devshells.ws/<name>
+nix flake check
+jj describe -m "fix: update Android platform-tools to 37.0.1"
+# push + PR, see the jj-workflow skill
 
-# Commit both repos
-git commit -m "fix: update Android platform-tools to 37.0.1"
+cd ~/Develop/github.com/kleinbem/nix-presets.ws/<name>
+nix flake check
+jj describe -m "fix: update Android platform-tools to 37.0.1"
+# push + PR
 ```
 
 ### Prevention for Next Time
@@ -144,9 +153,9 @@ lib.optionals (pkgs.stdenv.hostPlatform.system != "aarch64-linux") [
   waypipe
 ]
 
-# Test the affected platform
-nix eval '.#nixosConfigurations.orin-nano.config.environment.systemPackages' | grep waypipe
-# Should be empty (waypipe excluded on aarch64)
+# Test the affected platform (from nix-config/); prints false when waypipe is excluded
+nix eval '.#nixosConfigurations.orin-nano.config.environment.systemPackages' \
+  --apply 'ps: builtins.any (p: (p.pname or "") == "waypipe") ps'
 ```
 
 ---
@@ -164,35 +173,32 @@ just check-flake-lock-age
 # Shows which repos need updates (>30 days)
 ```
 
-### Step 2: Backup Before Update
+### Step 2: Start From a Clean Change
 
-```bash
-cd target-repo
-git stash  # Save any uncommitted work
-cp flake.lock flake.lock.backup
-```
+Work in a jj workspace (`just jj::ws-new <repo> <name>`). jj records every edit, so no backup
+file is needed: `jj restore flake.lock` brings back the old lock.
 
 ### Step 3: Update & Test
 
 ```bash
 nix flake update  # Fetch latest from all inputs
 
-# Quick sanity check
-nix flake check --override-input nix-devshells github:kleinbem/nix-devshells
+# Quick sanity check against the inputs the new lock pins
+nix flake check
 # or for nixos configs:
-nix eval '.#nixosConfigurations.mac-mini'
+nix eval '.#nixosConfigurations.mac-mini.config.system.build.toplevel.drvPath'
 
 # If error, revert:
-cp flake.lock.backup flake.lock
+jj restore flake.lock
 ```
 
 ### Step 4: Review & Commit
 
 ```bash
-git diff flake.lock  # Review what changed
+jj diff  # Review everything in the change, not just flake.lock
 
-# Commit with context
-git commit -m "chore: update flake.lock ($(date +%Y-%m-%d))
+# Describe with context (jj tracks flake.lock without staging), then push + PR
+jj describe -m "chore: update flake.lock ($(date +%Y-%m-%d))
 
 Updated inputs: nixpkgs, home-manager, ...
 No breaking changes detected.
@@ -244,12 +250,15 @@ just remote-ci 10  # See recent runs
 ### Step 3: Reproduce Locally
 
 ```bash
-# If possible, reproduce the exact failure locally
-cd nix-config
+# If possible, reproduce the exact failure locally, in your own nix-config workspace
+cd ~/Develop/github.com/kleinbem/nix && just jj::ws-new nix-config <name>
+# A failed PR instead: start at its head (after a jj git fetch): ... ws-new nix-config <name> -r <branch>@origin
+cd ~/Develop/github.com/kleinbem/nix-config.ws/<name>
 nix flake check --show-trace  # More verbose error
 
-# If cross-platform (e.g., aarch64 build on x86_64):
-nix build '.#nixosConfigurations.orin-nano' --system aarch64-linux
+# aarch64 host (e.g. orin-nano): the configuration sets its own platform; on x86_64 an
+# uncached build needs an aarch64 remote builder (orin-nano) or binfmt emulation.
+nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel'
 ```
 
 ### Step 4: Fix & Verify
@@ -259,9 +268,17 @@ nix build '.#nixosConfigurations.orin-nano' --system aarch64-linux
 # Run the same check that failed:
 nix flake check
 
-# If it passed, commit and push
-git commit -m "fix: <issue>"
-# Wait for YubiKey, then: git push origin main
+# If it passed, describe first, then push
+jj describe -m "fix: <issue>"
+
+# A fix for a failed PR goes onto that PR's branch:
+jj bookmark track <branch>@origin
+jj bookmark set <branch> -r @
+jj git push -b <branch>
+
+# A fix for main gets its own bookmark and PR (main only takes PRs):
+jj bookmark create <new-branch> -r @
+jj git push -b <new-branch>
 ```
 
 ---

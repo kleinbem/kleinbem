@@ -77,9 +77,12 @@ just maintenance::audit-versions android
   hooks:
     - id: version-consistency
       name: Check version consistency
-      entry: bash -c 'grep -r "platformToolsVersion.*36\|37" nix-* | check-version-consistency'
+      # The script scans its working directory, so run it from the workspace root
+      # to compare pins across all sibling repos.
+      entry: bash -c 'cd "$(git rev-parse --show-toplevel)/.." && kleinbem/tools/check-version-consistency.sh'
       language: system
-      files: '\.(nix|yaml)$'
+      pass_filenames: false
+      files: '\.nix$'
 ```
 
 **Effort:** Medium (3-4 hours)  
