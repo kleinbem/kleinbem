@@ -52,15 +52,18 @@ grep -r "platformToolsVersion.*36" nix-* --include="*.nix"
 
 ### Step 4: Update All Locations
 
+Each repo gets its own jj workspace and PR. Create the workspaces first and edit there, not in
+the primary checkouts:
+
 ```bash
-# Must update EVERY location consistently
+cd ~/Develop/github.com/kleinbem/nix && just jj::ws-new nix-devshells <name> && just jj::ws-new nix-presets <name>
+
+# Must update EVERY location consistently (in nix-devshells.ws/<name> and nix-presets.ws/<name>)
 nix-devshells/shells/android.nix:        platformToolsVersion = "37.0.1";
 nix-presets/nixosModules/android-emulator.nix:  platformToolsVersion = "37.0.1";
 ```
 
 ### Step 5: Test & Commit
-
-Each repo gets its own change and PR, made in a jj workspace (`just jj::ws-new <repo> <name>`):
 
 ```bash
 cd ~/Develop/github.com/kleinbem/nix-devshells.ws/<name>
@@ -170,13 +173,10 @@ just check-flake-lock-age
 # Shows which repos need updates (>30 days)
 ```
 
-### Step 2: Backup Before Update
+### Step 2: Start From a Clean Change
 
-```bash
-cd target-repo
-git stash  # Save any uncommitted work
-cp flake.lock flake.lock.backup
-```
+Work in a jj workspace (`just jj::ws-new <repo> <name>`). jj records every edit, so no backup
+file is needed: `jj restore flake.lock` brings back the old lock.
 
 ### Step 3: Update & Test
 
@@ -189,13 +189,13 @@ nix flake check
 nix eval '.#nixosConfigurations.mac-mini.config.system.build.toplevel.drvPath'
 
 # If error, revert:
-cp flake.lock.backup flake.lock
+jj restore flake.lock
 ```
 
 ### Step 4: Review & Commit
 
 ```bash
-jj diff flake.lock  # Review what changed
+jj diff  # Review everything in the change, not just flake.lock
 
 # Describe with context (jj tracks flake.lock without staging), then push + PR
 jj describe -m "chore: update flake.lock ($(date +%Y-%m-%d))
@@ -254,8 +254,9 @@ just remote-ci 10  # See recent runs
 cd nix-config
 nix flake check --show-trace  # More verbose error
 
-# If cross-platform (e.g., aarch64 build on x86_64):
-nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel' --system aarch64-linux
+# aarch64 host (e.g. orin-nano): the configuration sets its own platform; on x86_64 an
+# uncached build needs an aarch64 remote builder (orin-nano) or binfmt emulation.
+nix build '.#nixosConfigurations.orin-nano.config.system.build.toplevel'
 ```
 
 ### Step 4: Fix & Verify
