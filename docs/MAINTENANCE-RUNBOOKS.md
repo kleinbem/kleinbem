@@ -252,6 +252,7 @@ just remote-ci 10  # See recent runs
 ```bash
 # If possible, reproduce the exact failure locally, in your own nix-config workspace
 cd ~/Develop/github.com/kleinbem/nix && just jj::ws-new nix-config <name>
+# A failed PR instead: start at its head (after a jj git fetch): ... ws-new nix-config <name> -r <branch>@origin
 cd ~/Develop/github.com/kleinbem/nix-config.ws/<name>
 nix flake check --show-trace  # More verbose error
 
