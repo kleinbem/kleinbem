@@ -70,6 +70,7 @@ in repo *args:
     set -euo pipefail
     # repo-path also finds repos under sibling orgs (kleinbem-dev/<repo>).
     dir="$(ROOT="{{ROOT}}" bash "{{ROOT}}/kleinbem/tools/jj-fleet.sh" repo-path "{{repo}}")"
+    [ -d "$dir" ] || { echo "in: $dir does not exist; run 'just bootstrap {{repo}}'" >&2; exit 1; }
     cd "$dir"
     exec just {{args}}
 

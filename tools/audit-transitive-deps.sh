@@ -73,7 +73,7 @@ audit_transitive_deps() {
   echo "   nixpkgs rev: $current_rev"
   echo ""
 
-  local has_changes=0 evaluated=0
+  local has_changes=0 evaluated=0 compared=0 must_compare=0
 
   for pkg in "${WATCH_PACKAGES[@]}"; do
     local current_version
@@ -95,13 +95,16 @@ audit_transitive_deps() {
 
       if [ -z "$old_rev" ]; then
         echo "⚠️  could not read the nixpkgs revision from $OLD_LOCK, $pkg not compared" >&2
+        must_compare=1
       elif [ "$old_rev" != "$current_rev" ]; then
+        must_compare=1
         local old_version
         old_version=$(get_package_version "$pkg" "$old_rev" || echo "")
 
         if [ -z "$old_version" ] || [ "$old_version" = "unknown" ]; then
           echo "⚠️  $pkg: could not evaluate version at $old_rev, not compared" >&2
         else
+          compared=$((compared + 1))
           local old_major
           old_major=$(get_major_version "$old_version")
 
@@ -120,6 +123,11 @@ audit_transitive_deps() {
 
   if [ "$evaluated" -eq 0 ]; then
     echo "❌ No watched package version could be evaluated; the audit did not run" >&2
+    return 2
+  fi
+  # An old lock with a different nixpkgs rev must yield at least one comparison.
+  if [ "$must_compare" -eq 1 ] && [ "$compared" -eq 0 ]; then
+    echo "❌ No version could be compared against $OLD_LOCK; the audit did not run" >&2
     return 2
   fi
 
