@@ -2,8 +2,9 @@
 
 **Title:** Disable waypipe on aarch64-linux; x86_64-only for remote GUI forwarding  
 **Date:** 2026-08-17  
-**Status:** Implemented  
+**Status:** Reverted 2026-11-12: waypipe is back on every host ([nix-config#763](https://github.com/kleinbem/nix-config/pull/763))  
 **Supersedes:** None  
+**Upstream:** nixpkgs pinned waypipe to `ffmpeg_8` ([NixOS/nixpkgs#552268](https://github.com/NixOS/nixpkgs/pull/552268)); waypipe fixed FFmpeg 9 in [waypipe#174](https://gitlab.freedesktop.org/mstoeckl/waypipe/-/work_items/174), not yet released  
 
 ---
 

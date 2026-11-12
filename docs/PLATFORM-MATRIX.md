@@ -20,7 +20,7 @@ This document tracks which packages in the kleinbem fleet are platform-specific 
 | nixfmt, deadnix, statix | ✅ | ✅ | core | Nix linters (all hosts) |
 | android-tools | ✅ | ✅ | core | ADB/Fastboot (all hosts) |
 | mtr, tcpdump, lsof | ✅ | ✅ | core | Network/system diagnostics (debug floor) |
-| **waypipe** | ✅ | ❌ | core | SSH remote Wayland forwarding (**x86_64 desktop only**) |
+| waypipe | ✅ | ✅ | core | SSH remote Wayland forwarding (fleet-wide) |
 | bind.dnsutils | ✅ | ✅ | core | DNS troubleshooting (fleet-wide) |
 
 ### Desktop Environment (mac-mini only)
@@ -98,11 +98,10 @@ lib.optionals (config.nixpkgs.hostPlatform.system == "aarch64-linux") [
 
 ## Historical Notes
 
-### Waypipe (x86_64-only since 2026-08-17)
+### Waypipe (x86_64-only 2026-08-17 to 2026-11-12)
 - **Issue:** waypipe 0.11.0 incompatible with FFmpeg 9.0 (Vulkan API removal)
 - **Solution:** Conditional inclusion via `lib.optionals`
-- **Rationale:** Only x86_64 workstations use it for SSH remote GUI forwarding
-- **Status:** aarch64 headless devices don't need Wayland support
+- **Status:** Reverted: nixpkgs pinned waypipe to `ffmpeg_8` ([NixOS/nixpkgs#552268](https://github.com/NixOS/nixpkgs/pull/552268)), so it is on every host again ([nix-config#763](https://github.com/kleinbem/nix-config/pull/763))
 
 ### Android SDK (Updated to 37.0.1 on 2026-08-17)
 - **Issue:** platform-tools 36.0.1 no longer in nixpkgs; only 37.0.1 available
