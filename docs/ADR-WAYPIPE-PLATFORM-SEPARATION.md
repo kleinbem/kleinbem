@@ -99,11 +99,12 @@
 Run from `nix-config/`. An evaluation error fails the command instead of looking like "no match":
 
 ```bash
-# Verify waypipe excluded on aarch64: prints false
+# Since the revert (nix-config#763) both print true.
+# aarch64 (printed false while this ADR was in force)
 nix eval '.#nixosConfigurations.orin-nano.config.environment.systemPackages' \
   --apply 'ps: builtins.any (p: (p.pname or "") == "waypipe") ps'
 
-# Verify waypipe included on x86_64: prints true
+# x86_64
 nix eval '.#nixosConfigurations.mac-mini.config.environment.systemPackages' \
   --apply 'ps: builtins.any (p: (p.pname or "") == "waypipe") ps'
 ```
