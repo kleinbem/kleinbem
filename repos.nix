@@ -12,6 +12,7 @@
   nix-gantry = "git@github.com:kleinbem-dev/nix-gantry.git";
   nix-hardware = "git@github.com:kleinbem/nix-hardware.git";
   nix-packages = "git@github.com:kleinbem/nix-packages.git";
+  nix-omarchy = "git@github.com:kleinbem/nix-omarchy.git";
   nix-presets = "git@github.com:kleinbem/nix-presets.git";
   nix-templates = "git@github.com:kleinbem/nix-templates.git";
   openwrt-builder = "git@github.com:kleinbem/openwrt-builder.git";
