@@ -285,34 +285,26 @@ jj git push -b <new-branch>
 
 ## Task 5: Safe Flake.lock Refresh During Merge Conflicts
 
-**When:** Multiple repos updated flake.lock simultaneously
-
-### The Problem
-
-```bash
-# Scenario: You fetch latest changes, but flake.lock has merge conflict
-# Because you also updated flake.lock locally
-```
+**When:** main moved on (e.g. a "Maintain Flake" lock bump) while your PR also changes flake.lock
 
 ### Safe Resolution
 
+Don't merge lock files by hand: take main's lock and let Nix redo your change on top. Work in
+your PR's jj workspace.
+
 ```bash
-# DO NOT resolve manually; let Nix do it
-git status  # Shows conflict in flake.lock
-
-# Option A: Prefer remote (they just updated it)
-git checkout --theirs flake.lock
-nix flake update  # Reconcile with local inputs if any
-
-# Option B: Prefer local (you have recent changes)
-git checkout --ours flake.lock
-nix flake update  # Ensure consistency
-
-# Then:
-git add flake.lock
-git commit -m "resolve flake.lock merge conflict"
-nix flake check  # Verify the result
+jj git fetch
+jj rebase -r <your change> -d main@origin  # flake.lock now shows as conflicted
+jj new <your change>                       # resolve in a child, keep the rebase reviewable
+jj restore --from main@origin flake.lock   # start from main's lock
+nix flake update <input>                   # redo only the inputs your PR meant to bump
+nix flake check
+jj squash                                  # fold the resolution into your change
+jj git push -b <branch>
 ```
+
+If the PR is only behind (no conflict), `gh pr update-branch <n>` is enough. Never pass
+`--rebase`: GitHub's rebase drops the commit signatures and the PR stays blocked.
 
 ---
 
@@ -342,7 +334,10 @@ just remote-ci 5  # Recent runs green?
   - ✅ Do: Run `nix flake check` before committing
 
 - Resolve flake.lock conflicts by hand
-  - ✅ Do: Use `git checkout --ours/--theirs`, then `nix flake update`
+  - ✅ Do: `jj restore --from main@origin flake.lock`, then `nix flake update <input>` (Task 5)
+
+- Update a PR branch with `gh pr update-branch --rebase` or `jj git push --deleted`
+  - ✅ Do: `gh pr update-branch` without `--rebase` (keeps signatures), push with `jj git push -b <branch>`
 
 - Ignore "Maintain Flake" failures thinking they're transient
   - ✅ Do: Investigate; they usually indicate version/deprecation issues
