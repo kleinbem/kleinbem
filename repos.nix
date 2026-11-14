@@ -28,6 +28,7 @@
   skills = "git@github.com:kleinbem/skills.git";
   mesh-llm-ci = "git@github.com:kleinbem/mesh-llm-ci.git";
   mesh-llm-gpu = "git@github.com:kleinbem/mesh-llm-gpu.git";
+  hf-bench = "git@github.com:kleinbem/hf-bench.git";
   chrome-open-in-app = "git@github.com:kleinbem/chrome-open-in-app.git";
   aur-packages = "git@github.com:kleinbem/aur-packages.git";
   actions = "git@github.com:kleinbem/actions.git";
