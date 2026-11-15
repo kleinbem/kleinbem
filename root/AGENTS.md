@@ -35,8 +35,9 @@ just jj::ws-gc [filter]                    # reap empty ones after the PR merged
 - jj first (colocated with git). Raw `git` only for rescue.
 - Every default branch requires signed commits. jj signs with the YubiKey's no-touch key.
 - Every PR auto-merges: right after `gh pr create`, run `gh pr merge --auto --squash`. Public
-  repos also require the CodeRabbit check and resolved conversations, so answer every CodeRabbit
-  thread before walking away. Open a draft when a change must be held.
+  repos also require the CodeRabbit check and resolved conversations. CodeRabbit reviews only PRs
+  labelled `cr-review`; arm those after the review is handled (agent-ops says when to label).
+  Open a draft when a change must be held.
 - To bring a PR up to date use `gh pr update-branch` without `--rebase`: GitHub's rebase drops
   signatures.
 
