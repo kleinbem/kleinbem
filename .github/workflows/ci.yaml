@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
 
       - name: Actionlint
-        uses: kleinbem/actions/actionlint@9c2dd4246a1f91d324895247e1a390171288ffe0 # v1.1.0
+        uses: kleinbem/actions/actionlint@f1b4f5fc52ea31b1f9e53ca29170570fe4651c7d # v1.7.1
 
       - name: Syntax check (bash -n)
         run: |

@@ -17,5 +17,5 @@ jobs:
         with:
           fetch-depth: 0 # gitleaks scans every commit of the PR
           persist-credentials: false
-      - uses: kleinbem/actions/nix-setup@f716d62182471a9e862ae0bd61d34201e6cea971 # v1.3.1
-      - uses: kleinbem/actions/lint@f716d62182471a9e862ae0bd61d34201e6cea971 # v1.3.1
+      - uses: kleinbem/actions/nix-setup@f1b4f5fc52ea31b1f9e53ca29170570fe4651c7d # v1.7.1
+      - uses: kleinbem/actions/lint@f1b4f5fc52ea31b1f9e53ca29170570fe4651c7d # v1.7.1
