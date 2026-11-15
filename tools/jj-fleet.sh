@@ -95,8 +95,8 @@ resolve_targets() {
     bash "$ROOT/kleinbem/tools/resolve-targets.sh" "$1" $ALL_REPOS
 }
 
-# Workaround: gum table uses Go encoding/csv which fails on bare quotes in TSV.
-# no-link: not reported upstream yet.
+# Workaround: gum table parses CSV, so a field starting with a quote breaks
+# it, even with --lazy-quotes. Drop with charmbracelet/gum#1186.
 print_tsv_table() {
     tr '"' "'" | gum table -s "$(printf '\t')" --print
 }
