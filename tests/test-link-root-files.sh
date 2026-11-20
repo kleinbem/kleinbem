@@ -14,9 +14,7 @@ mkdir -p "$tmp/kleinbem/root"
 for f in AGENTS.md justfile .envrc; do
     echo "tracked $f" >"$tmp/kleinbem/root/$f"
 done
-for f in CLAUDE.md GEMINI.md .goosehints; do
-    ln -s AGENTS.md "$tmp/kleinbem/root/$f"
-done
+ln -s AGENTS.md "$tmp/kleinbem/root/CLAUDE.md"
 
 echo "link-root-files.sh"
 
@@ -24,6 +22,9 @@ echo "link-root-files.sh"
 # agent files are missing.
 echo "tracked justfile" >"$tmp/justfile"
 echo "local edit" >"$tmp/.envrc"
+# Old links from before Gemini/goose read AGENTS.md themselves.
+ln -s kleinbem/root/GEMINI.md "$tmp/GEMINI.md"
+ln -s kleinbem/root/.goosehints "$tmp/.goosehints"
 
 rc=0
 out=$(bash "$SCRIPT" "$tmp") || rc=$?
@@ -32,10 +33,10 @@ assert_eq "kleinbem/root/AGENTS.md" "$(readlink "$tmp/AGENTS.md")" \
     "missing AGENTS.md -> relative link created"
 assert_eq "kleinbem/root/CLAUDE.md" "$(readlink "$tmp/CLAUDE.md")" \
     "missing CLAUDE.md -> relative link created"
-assert_eq "kleinbem/root/GEMINI.md" "$(readlink "$tmp/GEMINI.md")" \
-    "missing GEMINI.md -> relative link created"
-assert_eq "kleinbem/root/.goosehints" "$(readlink "$tmp/.goosehints")" \
-    "missing .goosehints -> relative link created"
+assert_eq "no" "$([ -L "$tmp/GEMINI.md" ] && echo yes || echo no)" \
+    "old GEMINI.md link removed"
+assert_eq "no" "$([ -L "$tmp/.goosehints" ] && echo yes || echo no)" \
+    "old .goosehints link removed"
 assert_eq "kleinbem/root/justfile" "$(readlink "$tmp/justfile")" \
     "regular file with same content -> replaced with link"
 assert_empty "$(readlink "$tmp/.envrc" || true)" \
@@ -52,8 +53,8 @@ rc=0
 out=$(bash "$SCRIPT" "$tmp") || rc=$?
 assert_eq "kleinbem/root/.envrc" "$(readlink "$tmp/.envrc")" \
     "second run links the freed-up file"
-assert_eq "6" "$(grep -c '(linked)\|(link created)' <<<"$out")" \
-    "second run reports all six linked"
+assert_eq "4" "$(grep -c '(linked)\|(link created)' <<<"$out")" \
+    "second run reports all four linked"
 assert_eq "0" "$rc" "all linked -> exit 0"
 
 # A symlink pointing somewhere else is left alone.

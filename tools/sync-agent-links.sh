@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # sync-agent-links.sh [root] [filter]
 #
-# Ensures standard AI discovery symlinks (CLAUDE.md, GEMINI.md, .goosehints)
-# point to AGENTS.md across every repository in repos.nix.
+# Ensures CLAUDE.md -> AGENTS.md in every repository in repos.nix, and removes
+# old GEMINI.md / .goosehints links to AGENTS.md: Gemini CLI is pointed at
+# AGENTS.md in its settings (nix-config ai-agents.nix), and goose reads AGENTS.md
+# by default, so a .goosehints link loaded it twice.
 # Safe, idempotent, leaves differing regular files alone with a note.
 set -euo pipefail
 
@@ -77,32 +79,38 @@ for repo in $TARGETS; do
         continue
     fi
 
-    for link_name in CLAUDE.md GEMINI.md .goosehints; do
-        link_path="$dir/$link_name"
-        target="AGENTS.md"
-
-        if [ -L "$link_path" ]; then
-            dest="$(readlink "$link_path")"
-            if [ "$dest" != "$target" ]; then
-                echo "  ! $repo/$link_name: points to $dest, not $target; left alone"
-                status=1
-            fi
-        elif [ -e "$link_path" ]; then
-            if [ "$link_path" -ef "$dir/$target" ]; then
-                echo "  ! $repo/$link_name: hard link to $target; left alone"
-                status=1
-            elif cmp -s "$link_path" "$dir/$target"; then
-                ln -sfn "$target" "$link_path"
-                echo "  ✓ $repo/$link_name: same content, replaced with link -> $target"
-            else
-                echo "  ! $repo/$link_name: differing regular file; left alone"
-                status=1
-            fi
-        else
-            ln -s "$target" "$link_path"
-            echo "  ✓ $repo/$link_name -> $target (created)"
+    for old_link in GEMINI.md .goosehints; do
+        if [ -L "$dir/$old_link" ] && [ "$(readlink "$dir/$old_link")" = "AGENTS.md" ]; then
+            rm "$dir/$old_link"
+            echo "  ✓ $repo/$old_link: link to AGENTS.md removed"
         fi
     done
+
+    link_name=CLAUDE.md
+    link_path="$dir/$link_name"
+    target="AGENTS.md"
+
+    if [ -L "$link_path" ]; then
+        dest="$(readlink "$link_path")"
+        if [ "$dest" != "$target" ]; then
+            echo "  ! $repo/$link_name: points to $dest, not $target; left alone"
+            status=1
+        fi
+    elif [ -e "$link_path" ]; then
+        if [ "$link_path" -ef "$dir/$target" ]; then
+            echo "  ! $repo/$link_name: hard link to $target; left alone"
+            status=1
+        elif cmp -s "$link_path" "$dir/$target"; then
+            ln -sfn "$target" "$link_path"
+            echo "  ✓ $repo/$link_name: same content, replaced with link -> $target"
+        else
+            echo "  ! $repo/$link_name: differing regular file; left alone"
+            status=1
+        fi
+    else
+        ln -s "$target" "$link_path"
+        echo "  ✓ $repo/$link_name -> $target (created)"
+    fi
 done
 
 exit "$status"

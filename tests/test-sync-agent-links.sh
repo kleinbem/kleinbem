@@ -30,11 +30,15 @@ EOF
 mkdir -p "$tmp/repo-a"
 echo "content-a" >"$tmp/repo-a/AGENTS.md"
 
-# repo-b: has AGENTS.md, plus CLAUDE.md with same content, and a differing .goosehints
+# repo-a: also old GEMINI.md / .goosehints links to AGENTS.md, to be removed
+ln -s AGENTS.md "$tmp/repo-a/GEMINI.md"
+ln -s AGENTS.md "$tmp/repo-a/.goosehints"
+
+# repo-b: has AGENTS.md, CLAUDE.md with same content, and a real .goosehints
 mkdir -p "$tmp/repo-b"
 echo "content-b" >"$tmp/repo-b/AGENTS.md"
 echo "content-b" >"$tmp/repo-b/CLAUDE.md"
-echo "differing-goose" >"$tmp/repo-b/.goosehints"
+echo "own-goose-hints" >"$tmp/repo-b/.goosehints"
 
 # repo-c: no AGENTS.md (should be skipped without error)
 mkdir -p "$tmp/repo-c"
@@ -48,44 +52,38 @@ _out=$(bash "$SCRIPT" "$tmp") || rc=$?
 # repo-a assertions
 assert_eq "AGENTS.md" "$(readlink "$tmp/repo-a/CLAUDE.md")" \
     "repo-a: CLAUDE.md -> AGENTS.md created"
-assert_eq "AGENTS.md" "$(readlink "$tmp/repo-a/GEMINI.md")" \
-    "repo-a: GEMINI.md -> AGENTS.md created"
-assert_eq "AGENTS.md" "$(readlink "$tmp/repo-a/.goosehints")" \
-    "repo-a: .goosehints -> AGENTS.md created"
+assert_eq "no" "$([ -e "$tmp/repo-a/GEMINI.md" ] || [ -L "$tmp/repo-a/GEMINI.md" ] && echo yes || echo no)" \
+    "repo-a: old GEMINI.md link removed"
+assert_eq "no" "$([ -e "$tmp/repo-a/.goosehints" ] || [ -L "$tmp/repo-a/.goosehints" ] && echo yes || echo no)" \
+    "repo-a: old .goosehints link removed"
 
 # repo-b assertions
 assert_eq "AGENTS.md" "$(readlink "$tmp/repo-b/CLAUDE.md")" \
     "repo-b: same-content CLAUDE.md replaced with link"
-assert_eq "AGENTS.md" "$(readlink "$tmp/repo-b/GEMINI.md")" \
-    "repo-b: missing GEMINI.md created"
-assert_empty "$(readlink "$tmp/repo-b/.goosehints" || true)" \
-    "repo-b: differing .goosehints not replaced"
-assert_eq "differing-goose" "$(cat "$tmp/repo-b/.goosehints")" \
-    "repo-b: differing .goosehints retains content"
-assert_eq "1" "$rc" "differing file causes exit 1"
-
-# Resolve repo-b conflict and re-run with filter "repo-b"
-rm "$tmp/repo-b/.goosehints"
-rc=0
-bash "$SCRIPT" "$tmp" "repo-b" || rc=$?
-assert_eq "AGENTS.md" "$(readlink "$tmp/repo-b/.goosehints")" \
-    "repo-b: freed-up .goosehints linked on second run"
-assert_eq "0" "$rc" "filtered clean run exits 0"
+assert_eq "no" "$([ -e "$tmp/repo-b/GEMINI.md" ] && echo yes || echo no)" \
+    "repo-b: no GEMINI.md created"
+assert_eq "own-goose-hints" "$(cat "$tmp/repo-b/.goosehints")" \
+    "repo-b: a real .goosehints file is kept"
+assert_eq "0" "$rc" "clean run exits 0"
 
 # Foreign symlink handling
-ln -sfn "elsewhere.md" "$tmp/repo-a/GEMINI.md"
+rm "$tmp/repo-a/CLAUDE.md"
+ln -s "elsewhere.md" "$tmp/repo-a/CLAUDE.md"
+ln -s "elsewhere.md" "$tmp/repo-a/GEMINI.md"
 rc=0
 bash "$SCRIPT" "$tmp" "repo-a" >/dev/null || rc=$?
+assert_eq "elsewhere.md" "$(readlink "$tmp/repo-a/CLAUDE.md")" \
+    "foreign CLAUDE.md symlink left alone"
 assert_eq "elsewhere.md" "$(readlink "$tmp/repo-a/GEMINI.md")" \
-    "foreign symlink left alone"
+    "foreign GEMINI.md symlink left alone"
 assert_eq "1" "$rc" "foreign symlink causes exit 1"
 
 # Hardlink handling: hardlink to AGENTS.md is left alone, causes exit 1
-rm "$tmp/repo-a/GEMINI.md"
-ln "$tmp/repo-a/AGENTS.md" "$tmp/repo-a/GEMINI.md"
+rm "$tmp/repo-a/CLAUDE.md"
+ln "$tmp/repo-a/AGENTS.md" "$tmp/repo-a/CLAUDE.md"
 rc=0
 bash "$SCRIPT" "$tmp" "repo-a" >/dev/null || rc=$?
-assert_empty "$(readlink "$tmp/repo-a/GEMINI.md" || true)" \
+assert_empty "$(readlink "$tmp/repo-a/CLAUDE.md" || true)" \
     "hardlink to AGENTS.md left alone"
 assert_eq "1" "$rc" "hardlink causes exit 1"
 
