@@ -306,7 +306,7 @@ cmd_bootstrap() {
     # A differing local file is reported, not overwritten — don't fail the run.
     gum style --foreground 212 "🔗 Workspace-root links"
     bash "$ROOT/kleinbem/tools/link-root-files.sh" "$ROOT" || true
-    gum style --foreground 212 "🔗 Repo agent links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    gum style --foreground 212 "🔗 Repo agent links (CLAUDE.md -> AGENTS.md)"
     bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter" || true
     if [ "$failed" -ne 0 ]; then
         gum style --foreground 196 --margin "1 0" "❌ Some repos failed to bootstrap; rerun to retry them."
@@ -318,7 +318,7 @@ cmd_bootstrap() {
 # --- sync-agent-links ---
 cmd_sync_agent_links() {
     local filter="${1:-}"
-    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Syncing AI Discovery Links (CLAUDE/GEMINI/.goosehints -> AGENTS.md)"
+    gum style --border normal --padding "0 2" --border-foreground 212 --foreground 212 "🔗 Syncing agent links (CLAUDE.md -> AGENTS.md)"
     bash "$ROOT/kleinbem/tools/sync-agent-links.sh" "$ROOT" "$filter"
 }
 

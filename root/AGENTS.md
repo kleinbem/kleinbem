@@ -1,7 +1,8 @@
 # AGENTS.md
 
-Always-on guidance for AI assistants in the kleinbem fleet workspace. `CLAUDE.md`, `GEMINI.md`
-and `.goosehints` are symlinks to this file; edit it in `kleinbem/root/`. It loads in every
+Always-on guidance for AI assistants in the kleinbem fleet workspace. `CLAUDE.md` is a symlink
+to this file; edit it in `kleinbem/root/`. Gemini CLI and goose read `AGENTS.md` themselves
+(nix-config `ai-agents.nix`), so repos need no `GEMINI.md` or `.goosehints`. It loads in every
 session, so it stays short: fleet orientation (conductors, what each repo is for, every `just`
 recipe, where IaC goes) is in the `kleinbem-fleet` skill, jj detail in `jj-workflow`, builds,
 CI and CodeRabbit in `agent-ops`.

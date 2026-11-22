@@ -191,7 +191,7 @@ sync filter="":
 bootstrap filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh bootstrap {{filter}}
 
-# Sync CLAUDE.md, GEMINI.md, and .goosehints symlinks across repos in repos.nix.
+# Link CLAUDE.md -> AGENTS.md in every repo in repos.nix; drops old GEMINI.md/.goosehints links.
 [group("Development")]
 sync-agent-links filter="":
     @ROOT={{ROOT}} bash {{ROOT}}/kleinbem/tools/run-jj-fleet.sh sync-agent-links {{filter}}
