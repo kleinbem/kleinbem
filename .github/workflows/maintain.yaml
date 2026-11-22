@@ -10,7 +10,7 @@ permissions: {}
 
 jobs:
   maintain:
-    uses: kleinbem/actions/.github/workflows/maintain-flake.yaml@4c768a74873b0de7772c1af40b777bacb7c68495 # v1.6.2
+    uses: kleinbem/actions/.github/workflows/maintain-flake.yaml@f1b4f5fc52ea31b1f9e53ca29170570fe4651c7d # v1.7.1
     secrets:
       app-id: ${{ secrets.APP_ID }}
       app-private-key: ${{ secrets.APP_PRIVATE_KEY }}
