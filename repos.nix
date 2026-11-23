@@ -35,6 +35,7 @@
   actions = "git@github.com:kleinbem/actions.git";
   coderabbit = "git@github.com:kleinbem/coderabbit.git";
   coderabbit-dev = "git@github.com:kleinbem-dev/coderabbit.git";
+  coderabbit-steward = "git@github.com:kleinbem-dev/coderabbit-steward.git";
   cadre = "git@github.com:kleinbem-dev/cadre.git";
   revue = "git@github.com:kleinbem-dev/revue.git";
   foyer = "git@github.com:kleinbem-dev/foyer.git";
