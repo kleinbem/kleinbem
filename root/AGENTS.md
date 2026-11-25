@@ -1,7 +1,8 @@
 # AGENTS.md
 
-Always-on guidance for AI assistants in the kleinbem fleet workspace. `CLAUDE.md`, `GEMINI.md`
-and `.goosehints` are symlinks to this file; edit it in `kleinbem/root/`. It loads in every
+Always-on guidance for AI assistants in the kleinbem fleet workspace. `CLAUDE.md` is a symlink
+to this file; edit it in `kleinbem/root/`. Gemini CLI and goose read `AGENTS.md` themselves
+(nix-config `ai-agents.nix`), so repos need no `GEMINI.md` or `.goosehints`. It loads in every
 session, so it stays short: fleet orientation (conductors, what each repo is for, every `just`
 recipe, where IaC goes) is in the `kleinbem-fleet` skill, jj detail in `jj-workflow`, builds,
 CI and CodeRabbit in `agent-ops`.
@@ -35,8 +36,9 @@ just jj::ws-gc [filter]                    # reap empty ones after the PR merged
 - jj first (colocated with git). Raw `git` only for rescue.
 - Every default branch requires signed commits. jj signs with the YubiKey's no-touch key.
 - Every PR auto-merges: right after `gh pr create`, run `gh pr merge --auto --squash`. Public
-  repos also require the CodeRabbit check and resolved conversations, so answer every CodeRabbit
-  thread before walking away. Open a draft when a change must be held.
+  repos also require the CodeRabbit check and resolved conversations. CodeRabbit reviews only PRs
+  labelled `cr-review`; arm those after the review is handled (agent-ops says when to label).
+  Open a draft when a change must be held.
 - To bring a PR up to date use `gh pr update-branch` without `--rebase`: GitHub's rebase drops
   signatures.
 
